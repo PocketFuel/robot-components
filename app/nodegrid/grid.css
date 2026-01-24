@@ -1,13 +1,13 @@
-/* Override bg-page for this route - using neutral-900 */
+/* Route-level background uses theme vars */
 :root {
-  --bg-page: #171717 !important;
-  --grey-5: #171717 !important;
+  --bg-page: var(--app-bg) !important;
+  --grey-5: var(--app-bg) !important;
 }
 
 html, body, #app-content {
-  background-color: #171717 !important;
+  background-color: var(--app-bg) !important;
 }
 
 body.page-loading::before {
-  background: #171717 !important;
+  background: var(--app-bg) !important;
 }

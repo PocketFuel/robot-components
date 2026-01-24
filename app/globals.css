@@ -12,8 +12,8 @@ html {
 
 html,
 body {
-  background-color: #171717; /* neutral-900 */
-  color: #fff;
+  background-color: var(--app-bg);
+  color: var(--app-fg);
   font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
@@ -31,6 +31,27 @@ h1, h2, h3, h4, h5, h6 {
 :root {
   --grey-6: #3a3a3a;
   --grey-8: #2f2f2f;
+
+  /* App theme vars (default: dark) */
+  --app-bg: #171717;
+  --app-fg: #ffffff;
+  --panel-bg: #2a2a2a;
+  --panel-border: rgba(255, 255, 255, 0.18);
+  --muted-fg: rgba(255, 255, 255, 0.45);
+  --muted-fg-2: rgba(255, 255, 255, 0.3);
+  --accent: #2563eb;
+  --accent-rgb: 37, 99, 235;
+  --btn-outline: rgba(255,255,255,0.1);
+}
+
+html[data-theme='light'] {
+  --app-bg: #f7f7f7;
+  --app-fg: #111111;
+  --panel-bg: #ffffff;
+  --panel-border: rgba(0, 0, 0, 0.14);
+  --muted-fg: rgba(0, 0, 0, 0.55);
+  --muted-fg-2: rgba(0, 0, 0, 0.38);
+  --btn-outline: rgba(0,0,0,0.12);
 }
 
 /* Button skin */

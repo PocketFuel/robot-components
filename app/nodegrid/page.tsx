@@ -909,6 +909,7 @@ function FloatingPanel({
   initialY,
   initialWidth,
   initialHeight,
+  gridType,
   config,
   isTopPanel,
   isExiting,
@@ -931,6 +932,7 @@ function FloatingPanel({
   initialY: number;
   initialWidth: number;
   initialHeight: number;
+  gridType: GridType;
   config: PhysicsConfig;
   isTopPanel?: boolean;
   isExiting?: boolean;
@@ -1190,6 +1192,7 @@ function FloatingPanel({
     const edge = getResizeEdge(e);
     setResizeEdge(edge);
   };
+
 
   // Handle mouse leave
   const handlePanelMouseLeave = () => {
@@ -1512,7 +1515,7 @@ function FloatingPanel({
   };
 
   // Handle touch resize start
-  const handleTouchResizeStart = (touch: Touch, edge: ResizeEdge) => {
+  const handleTouchResizeStart = (touch: Touch | React.Touch, edge: ResizeEdge) => {
     if (!edge) return;
 
     const panel = panelRef.current;
@@ -1948,7 +1951,7 @@ function FloatingPanel({
           height: '100%',
           borderRadius: 12,
           position: 'relative',
-          backgroundColor: '#2a2a2a',
+          backgroundColor: 'var(--panel-bg)',
           boxShadow: IDLE_SHADOW,
           border: `1px solid rgba(255, 255, 255, ${borderOpacity})`,
           transition: 'border-color 0.2s ease',
@@ -2305,10 +2308,10 @@ interface CutConnection {
   cutTime: number;
 }
 
-function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mousePos, panels, connections, connectionDrag, sliceTrail, cutConnections, onCutAnimationComplete }: { panelX: number; panelY: number; panelWidth: number; panelHeight: number; pulses: PulseEvent[]; mousePos: { x: number; y: number } | null; panels: FloatingPanelData[]; connections: PanelConnection[]; connectionDrag: ConnectionDrag | null; sliceTrail: SlicePoint[]; cutConnections: CutConnection[]; onCutAnimationComplete: (id: string) => void }) {
+function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mousePos, panels, connections, connectionDrag, sliceTrail, cutConnections, onCutAnimationComplete, gridType, theme, accentHex, onCanvasReady }: { panelX: number; panelY: number; panelWidth: number; panelHeight: number; pulses: PulseEvent[]; mousePos: { x: number; y: number } | null; panels: FloatingPanelData[]; connections: PanelConnection[]; connectionDrag: ConnectionDrag | null; sliceTrail: SlicePoint[]; cutConnections: CutConnection[]; onCutAnimationComplete: (id: string) => void; gridType: GridType; theme: 'dark' | 'light'; accentHex: string; onCanvasReady?: (canvas: HTMLCanvasElement | null) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
-  const dotsRef = useRef<Map<string, { x: number; y: number; vx: number; vy: number; size: number; targetSize: number; brightness: number }>>(new Map());
+  const dotsRef = useRef<Map<string, { x: number; y: number; baseX: number; baseY: number; vx: number; vy: number; size: number; targetSize: number; brightness: number }>>(new Map());
   const lastPanelRef = useRef({ x: panelX, y: panelY, width: panelWidth, height: panelHeight });
   const pulsesRef = useRef<PulseEvent[]>(pulses);
   const mousePosRef = useRef<{ x: number; y: number } | null>(mousePos);
@@ -2318,6 +2321,10 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
   const sliceTrailRef = useRef<SlicePoint[]>(sliceTrail);
   const cutConnectionsRef = useRef<CutConnection[]>(cutConnections);
   const onCutAnimationCompleteRef = useRef(onCutAnimationComplete);
+  const themeRef = useRef<'dark' | 'light'>(theme);
+  const accentRgbRef = useRef<{ r: number; g: number; b: number }>({ r: 37, g: 99, b: 235 });
+  const gridTypeRef = useRef<GridType>(gridType);
+  const transitionRef = useRef<{ active: boolean; start: number; duration: number } | null>(null);
 
   // Update connectionDrag ref immediately (not waiting for effect) for faster line drawing
   connectionDragRef.current = connectionDrag;
@@ -2331,16 +2338,41 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    onCanvasReady?.(canvas);
+    return () => onCanvasReady?.(null);
+  }, [onCanvasReady]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const gridSize = 40;
     const maxDist = 400;
-    const pushStrength = 25;
+    const pushStrength = 8; // Reduced from 25 to make repulsion less aggressive
     const springStiffness = 0.08;
     const damping = 0.75;
     const parallaxFactor = 0.08;
+    
+    // Isometric grid parameters
+    const isometricTileWidth = gridSize * 2;
+    const isometricTileHeight = gridSize * Math.sqrt(3);
+    const isometricAngle = Math.PI / 6; // 30 degrees
+    
+    // Hexagonal grid parameters
+    const hexSize = gridSize;
+    const hexWidth = hexSize * 2;
+    const hexHeight = hexSize * Math.sqrt(3);
+    
+    // Polar grid parameters (will be set after width/height are available)
+    let polarCenterX = 0;
+    let polarCenterY = 0;
+    const polarRadialLines = 32; // Number of radial lines (increased for more points)
+    const polarRings = 25; // Number of concentric rings (increased to fill more space)
+    let polarMinRadius = 20;
+    let polarMaxRadius = 0;
 
     // Triangle particle settings
     const particleCount = 12; // Triangles per explosion
@@ -2482,8 +2514,9 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       const lifeRatio = p.life / p.maxLife;
       const alpha = p.opacity * lifeRatio;
 
-      ctx.fillStyle = `rgba(37, 99, 235, ${alpha})`;
-      ctx.strokeStyle = `rgba(100, 160, 255, ${alpha * 0.8})`;
+      const { r: ar, g: ag, b: ab } = accentRgbRef.current;
+      ctx.fillStyle = `rgba(${ar}, ${ag}, ${ab}, ${alpha})`;
+      ctx.strokeStyle = `rgba(${Math.min(255, ar + 63)}, ${Math.min(255, ag + 61)}, ${Math.min(255, ab + 20)}, ${alpha * 0.8})`;
       ctx.lineWidth = 0.5;
 
       if (p.shape === 'circle') {
@@ -2510,9 +2543,9 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       const alpha = p.opacity;
 
       if (p.color === 'blue') {
-        // Pulse blue color (#2563EB = rgb(37, 99, 235))
-        ctx.fillStyle = `rgba(37, 99, 235, ${alpha * 0.95})`;
-        ctx.strokeStyle = `rgba(100, 160, 255, ${alpha * 0.8})`;
+        const { r: ar, g: ag, b: ab } = accentRgbRef.current;
+        ctx.fillStyle = `rgba(${ar}, ${ag}, ${ab}, ${alpha * 0.95})`;
+        ctx.strokeStyle = `rgba(${Math.min(255, ar + 63)}, ${Math.min(255, ag + 61)}, ${Math.min(255, ab + 20)}, ${alpha * 0.8})`;
         ctx.lineWidth = 0.5;
       } else {
         // Cyan/white (original)
@@ -2779,19 +2812,395 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
     let height = window.innerHeight;
     canvas.width = width;
     canvas.height = height;
+    
+    // Set polar grid parameters now that width/height are available
+    polarCenterX = width / 2;
+    polarCenterY = height / 2;
+    // Extend grid to fill more of the screen, reaching closer to corners
+    const diagonal = Math.sqrt(width * width + height * height);
+    polarMaxRadius = diagonal * 0.6; // Use diagonal to reach corners better
+
+    // Convert isometric grid coordinates to screen coordinates
+    const isometricToScreen = (isoX: number, isoY: number) => {
+      const screenX = (isoX - isoY) * (isometricTileWidth / 2);
+      const screenY = (isoX + isoY) * (isometricTileHeight / 2);
+      return { x: screenX, y: screenY };
+    };
+    
+    // Convert screen coordinates to isometric grid coordinates
+    const screenToIsometric = (screenX: number, screenY: number) => {
+      const isoX = (screenX / (isometricTileWidth / 2) + screenY / (isometricTileHeight / 2)) / 2;
+      const isoY = (screenY / (isometricTileHeight / 2) - screenX / (isometricTileWidth / 2)) / 2;
+      return { isoX, isoY };
+    };
+    
+    // Hexagonal grid: convert axial coordinates (q, r) to screen coordinates
+    const hexToScreen = (q: number, r: number) => {
+      const x = hexWidth * (q + r / 2);
+      const y = hexHeight * r;
+      return { x, y };
+    };
+    
+    // Hexagonal grid: convert screen coordinates to axial coordinates
+    const screenToHex = (screenX: number, screenY: number) => {
+      const q = (screenX * 2/3) / hexSize;
+      const r = (-screenX / 3 + screenY * Math.sqrt(3) / 3) / hexSize;
+      return hexRound(q, r);
+    };
+    
+    // Hexagonal grid: round to nearest hex coordinate
+    const hexRound = (q: number, r: number) => {
+      let s = -q - r;
+      let rq = Math.round(q);
+      let rr = Math.round(r);
+      let rs = Math.round(s);
+      const qDiff = Math.abs(rq - q);
+      const rDiff = Math.abs(rr - r);
+      const sDiff = Math.abs(rs - s);
+      if (qDiff > rDiff && qDiff > sDiff) {
+        rq = -rr - rs;
+      } else if (rDiff > sDiff) {
+        rr = -rq - rs;
+      }
+      return { q: rq, r: rr };
+    };
+    
+    // Get hex neighbors (6 directions)
+    const getHexNeighbors = (q: number, r: number) => {
+      const directions = [
+        { q: 1, r: 0 },
+        { q: 1, r: -1 },
+        { q: 0, r: -1 },
+        { q: -1, r: 0 },
+        { q: -1, r: 1 },
+        { q: 0, r: 1 },
+      ];
+      return directions.map(d => ({ q: q + d.q, r: r + d.r }));
+    };
+    
+    // Polar grid: convert polar coordinates (angle, radius) to screen coordinates
+    const polarToScreen = (angle: number, radius: number) => {
+      const x = polarCenterX + radius * Math.cos(angle);
+      const y = polarCenterY + radius * Math.sin(angle);
+      return { x, y };
+    };
+    
+    // Polar grid: convert screen coordinates to polar coordinates
+    const screenToPolar = (screenX: number, screenY: number) => {
+      const dx = screenX - polarCenterX;
+      const dy = screenY - polarCenterY;
+      const radius = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx);
+      return { angle, radius };
+    };
+
+    const isWeb =
+      gridType === 'web_one' ||
+      gridType === 'quantum_web';
 
     // Initialize dots
-    const initDots = () => {
-      dotsRef.current.clear();
+    const computeLayout = (type: GridType) => {
+      const out = new Map<string, { x: number; y: number }>();
+
+      const isWeb = type === 'web_one' || type === 'quantum_web';
+
+      if (type === 'isometric') {
+        const margin = 200;
+        const offsetX = width / 2;
+        const offsetY = height / 2;
+        const corners = [
+          { x: -margin, y: -margin },
+          { x: width + margin, y: -margin },
+          { x: -margin, y: height + margin },
+          { x: width + margin, y: height + margin },
+        ];
+        let minIsoX = Infinity, maxIsoX = -Infinity;
+        let minIsoY = Infinity, maxIsoY = -Infinity;
+        corners.forEach(corner => {
+          const { isoX, isoY } = screenToIsometric(corner.x - offsetX, corner.y - offsetY);
+          minIsoX = Math.min(minIsoX, Math.floor(isoX) - 2);
+          maxIsoX = Math.max(maxIsoX, Math.ceil(isoX) + 2);
+          minIsoY = Math.min(minIsoY, Math.floor(isoY) - 2);
+          maxIsoY = Math.max(maxIsoY, Math.ceil(isoY) + 2);
+        });
+        for (let isoX = minIsoX; isoX <= maxIsoX; isoX++) {
+          for (let isoY = minIsoY; isoY <= maxIsoY; isoY++) {
+            const screen = isometricToScreen(isoX, isoY);
+            const x = screen.x + offsetX;
+            const y = screen.y + offsetY;
+            if (x >= -margin && x <= width + margin && y >= -margin && y <= height + margin) {
+              out.set(`${isoX},${isoY}`, { x, y });
+            }
+          }
+        }
+        return out;
+      }
+
+      if (type === 'hexagonal') {
+        const margin = 200;
+        const offsetX = width / 2;
+        const offsetY = height / 2;
+        const radius = Math.ceil(Math.max(width, height) / hexSize) + 5;
+        for (let q = -radius; q <= radius; q++) {
+          for (let r = -radius; r <= radius; r++) {
+            if (Math.abs(q + r) > radius) continue;
+            const screen = hexToScreen(q, r);
+            const x = screen.x + offsetX;
+            const y = screen.y + offsetY;
+            if (x >= -margin && x <= width + margin && y >= -margin && y <= height + margin) {
+              out.set(`${q},${r}`, { x, y });
+            }
+          }
+        }
+        return out;
+      }
+
+      if (isWeb) {
+        const margin = 200;
+        const angleStep = (2 * Math.PI) / polarRadialLines;
+        const radiusStep = (polarMaxRadius - polarMinRadius) / polarRings;
+        for (let ring = 0; ring <= polarRings; ring++) {
+          const radius = polarMinRadius + ring * radiusStep;
+          for (let radial = 0; radial < polarRadialLines; radial++) {
+            const angle = radial * angleStep;
+            const screen = polarToScreen(angle, radius);
+            if (screen.x >= -margin && screen.x <= width + margin && screen.y >= -margin && screen.y <= height + margin) {
+              out.set(`polar_${ring}_${radial}`, { x: screen.x, y: screen.y });
+            }
+          }
+        }
+        return out;
+      }
+
+      if (type === 'triangular') {
+        const margin = 200;
+        const triStepX = gridSize;
+        const triStepY = gridSize * 0.8660254037844386;
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const rows = Math.ceil((height + margin * 2) / triStepY) + 2;
+        const cols = Math.ceil((width + margin * 2) / triStepX) + 2;
+        for (let row = -rows; row <= rows; row++) {
+          const rowOffset = (row & 1) ? triStepX * 0.5 : 0;
+          const y = centerY + row * triStepY;
+          for (let col = -cols; col <= cols; col++) {
+            const x = centerX + col * triStepX + rowOffset;
+            if (x >= -margin && x <= width + margin && y >= -margin && y <= height + margin) {
+              out.set(`tri_${row}_${col}`, { x, y });
+            }
+          }
+        }
+        return out;
+      }
+
+      if (type === 'mesh') {
+        const margin = 220;
+        const stepX = gridSize * 1.6;
+        const stepY = gridSize * 1.38;
+        const jitter = gridSize * 0.45;
+        const cols = Math.ceil((width + margin * 2) / stepX) + 2;
+        const rows = Math.ceil((height + margin * 2) / stepY) + 2;
+        const hash01 = (a: number, b: number, salt: number) => {
+          let n = (a * 73856093) ^ (b * 19349663) ^ (salt * 83492791);
+          n = (n ^ (n >>> 13)) >>> 0;
+          n = (n * 1274126177) >>> 0;
+          return (n >>> 0) / 0xffffffff;
+        };
+        for (let r = -1; r <= rows; r++) {
+          for (let c = -1; c <= cols; c++) {
+            const baseX = c * stepX - margin;
+            const baseY = r * stepY - margin;
+            const jx = (hash01(r, c, 1) - 0.5) * 2 * jitter;
+            const jy = (hash01(r, c, 2) - 0.5) * 2 * jitter;
+            const x = baseX + jx;
+            const y = baseY + jy;
+            if (x < -margin || x > width + margin || y < -margin || y > height + margin) continue;
+            out.set(`mesh_${r}_${c}`, { x, y });
+          }
+        }
+        return out;
+      }
+
+      if (type === 'flux') {
+        const amp1 = 18;
+        const amp2 = 10;
+        const f1 = 0.012;
+        const f2 = 0.009;
       for (let gx = -gridSize; gx < width + gridSize * 2; gx += gridSize) {
         for (let gy = -gridSize; gy < height + gridSize * 2; gy += gridSize) {
-          const key = `${gx},${gy}`;
-          dotsRef.current.set(key, { x: gx, y: gy, vx: 0, vy: 0, size: 1, targetSize: 1, brightness: 1 });
+            const x = gx + amp1 * Math.sin(gy * f1) + amp2 * Math.sin(gx * f2);
+            const y = gy + amp1 * Math.cos(gx * f1) + amp2 * Math.cos(gy * f2);
+            out.set(`${gx},${gy}`, { x, y });
+          }
+        }
+        return out;
+      }
+
+      if (type === 'constellation') {
+        // (same as existing init; will be built by initDots which also builds neighbor map)
+        // We'll defer to initDots for now by returning empty and letting initDots handle it.
+        return out;
+      }
+
+      // rectangular default
+      for (let gx = -gridSize; gx < width + gridSize * 2; gx += gridSize) {
+        for (let gy = -gridSize; gy < height + gridSize * 2; gy += gridSize) {
+          out.set(`${gx},${gy}`, { x: gx, y: gy });
+        }
+      }
+      return out;
+    };
+
+    const initDots = (type: GridType = gridTypeRef.current) => {
+      dotsRef.current.clear();
+      if (type === 'constellation') {
+        // Constellation: deterministic star field + kNN links (stable)
+        const margin = 220;
+        const count = Math.floor((width * height) / 45000) + 60; // scale with viewport, ~60-120
+        const pts: Array<{ key: string; x: number; y: number }> = [];
+
+        const hash = (n: number) => {
+          // 32-bit mix, deterministic
+          n = (n ^ 61) ^ (n >>> 16);
+          n = n + (n << 3);
+          n = n ^ (n >>> 4);
+          n = n * 0x27d4eb2d;
+          n = n ^ (n >>> 15);
+          return n >>> 0;
+        };
+        const rand01 = (seed: number) => (hash(seed) / 0xffffffff);
+
+        for (let i = 0; i < count; i++) {
+          const rx = rand01(i * 2 + 11);
+          const ry = rand01(i * 2 + 97);
+          // Center-weighted distribution (keeps content near where cards usually live)
+          const cx = (rx - 0.5) * 2;
+          const cy = (ry - 0.5) * 2;
+          const w = 0.65;
+          const x = width / 2 + cx * (width * w);
+          const y = height / 2 + cy * (height * w);
+          if (x < -margin || x > width + margin || y < -margin || y > height + margin) continue;
+          const key = `star_${i}`;
+          pts.push({ key, x, y });
+          dotsRef.current.set(key, { x, y, baseX: x, baseY: y, vx: 0, vy: 0, size: 1, targetSize: 1, brightness: 1 });
+        }
+
+        // Build kNN neighbor map (undirected)
+        const k = 3;
+        const neighborMap = new Map<string, string[]>();
+        for (let i = 0; i < pts.length; i++) neighborMap.set(pts[i].key, []);
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i];
+          const dists: Array<{ key: string; d: number }> = [];
+          for (let j = 0; j < pts.length; j++) {
+            if (i === j) continue;
+            const b = pts[j];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            dists.push({ key: b.key, d: dx * dx + dy * dy });
+          }
+          dists.sort((u, v) => u.d - v.d);
+          for (let n = 0; n < Math.min(k, dists.length); n++) {
+            const bKey = dists[n].key;
+            neighborMap.get(a.key)!.push(bKey);
+            neighborMap.get(bKey)!.push(a.key);
+          }
+        }
+
+        // Store on dotsRef itself via a hidden map on the ref object (cheap)
+        (dotsRef.current as unknown as { __constellation?: Map<string, string[]> }).__constellation = neighborMap;
+      } else {
+        const layout = computeLayout(type);
+        for (const [key, p] of layout.entries()) {
+          dotsRef.current.set(key, { x: p.x, y: p.y, baseX: p.x, baseY: p.y, vx: 0, vy: 0, size: 1, targetSize: 1, brightness: 1 });
         }
       }
     };
 
-    initDots();
+    const startTransitionTo = (nextType: GridType) => {
+      const now = performance.now();
+      transitionRef.current = { active: true, start: now, duration: 900 };
+
+      // Build target layout
+      const targetLayout = nextType === 'constellation' ? new Map<string, { x: number; y: number }>() : computeLayout(nextType);
+
+      // Snapshot existing dots for spatial lookup
+      const old = Array.from(dotsRef.current.entries()).map(([k, d]) => ({ k, d }));
+      const used = new Set<string>();
+
+      // Bin old dots for nearest search
+      const cell = 90;
+      const bins: Map<string, Array<{ k: string; x: number; y: number }>> = new Map();
+      for (const { k, d } of old) {
+        const ix = Math.floor(d.x / cell);
+        const iy = Math.floor(d.y / cell);
+        const bk = `${ix},${iy}`;
+        const arr = bins.get(bk) ?? [];
+        arr.push({ k, x: d.x, y: d.y });
+        bins.set(bk, arr);
+      }
+
+      const nearestOld = (x: number, y: number): { k: string; x: number; y: number; d2: number } | null => {
+        const ix0 = Math.floor(x / cell);
+        const iy0 = Math.floor(y / cell);
+        let best: { k: string; x: number; y: number; d2: number } | null = null;
+        for (let r = 0; r <= 2; r++) {
+          for (let dx = -r; dx <= r; dx++) {
+            for (let dy = -r; dy <= r; dy++) {
+              const bk = `${ix0 + dx},${iy0 + dy}`;
+              const arr = bins.get(bk);
+              if (!arr) continue;
+              for (const p of arr) {
+                if (used.has(p.k)) continue;
+                const ddx = p.x - x;
+                const ddy = p.y - y;
+                const d2 = ddx * ddx + ddy * ddy;
+                if (!best || d2 < best.d2) best = { ...p, d2 };
+              }
+            }
+          }
+          if (best) break;
+        }
+        if (best !== null) {
+          used.add((best as { k: string }).k);
+        }
+        return best;
+      };
+
+      const nextDots = new Map<string, typeof old[number]['d']>();
+
+      if (nextType === 'constellation') {
+        // Re-init constellation fully but seed positions from old dots (soft)
+        initDots('constellation');
+        const stars = Array.from(dotsRef.current.entries());
+        dotsRef.current.clear();
+        for (const [k, d] of stars) {
+          const m = nearestOld(d.baseX, d.baseY);
+          const sx = m ? m.x : d.baseX;
+          const sy = m ? m.y : d.baseY;
+          nextDots.set(k, { ...d, x: sx, y: sy, vx: 0, vy: 0 });
+        }
+      } else {
+        for (const [k, p] of targetLayout.entries()) {
+          const m = nearestOld(p.x, p.y);
+          const sx = m ? m.x : p.x;
+          const sy = m ? m.y : p.y;
+          nextDots.set(k, { x: sx, y: sy, baseX: p.x, baseY: p.y, vx: 0, vy: 0, size: 1, targetSize: 1, brightness: 1 });
+        }
+      }
+
+      // Keep unmatched old dots around briefly (fade via size shrink)
+      for (const { k, d } of old) {
+        if (used.has(k)) continue;
+        nextDots.set(`_old_${k}`, { ...d, baseX: d.x, baseY: d.y, vx: 0, vy: 0, size: 0.8, targetSize: 0.4, brightness: d.brightness });
+      }
+
+      dotsRef.current = nextDots;
+    };
+
+    // Initialize with current grid type
+    let currentType: GridType = gridTypeRef.current;
+    initDots(currentType);
 
     let lastTime = performance.now();
 
@@ -2799,6 +3208,25 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       const now = performance.now();
       const deltaTime = now - lastTime;
       lastTime = now;
+
+      // If the requested gridType changed, start a smooth transition
+      if (gridTypeRef.current !== currentType) {
+        startTransitionTo(gridTypeRef.current);
+        currentType = gridTypeRef.current;
+      }
+
+      // Cleanup old dots after transition
+      const tr = transitionRef.current;
+      if (tr?.active) {
+        const t = Math.min(1, (now - tr.start) / tr.duration);
+        if (t >= 1) {
+          // Drop any leftover _old_* dots
+          for (const k of Array.from(dotsRef.current.keys())) {
+            if (k.startsWith('_old_')) dotsRef.current.delete(k);
+          }
+          tr.active = false;
+        }
+      }
 
       // Check for new pulses and spawn particles
       for (const pulse of pulsesRef.current) {
@@ -2882,7 +3310,19 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
         const dy = baseY - closestY;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const normalizedDist = Math.min(dist / maxDist, 1);
-        const pushAmount = dist > 0 ? Math.pow(1 - normalizedDist, 2) * pushStrength : 0;
+        let pushAmount = dist > 0 ? Math.pow(1 - normalizedDist, 2) * pushStrength : 0;
+        
+      // For web family, limit push to max 48px
+      const isWeb =
+        gridType === 'web_one' ||
+        gridType === 'quantum_web';
+      if (isWeb) {
+          const maxPushDistance = 48;
+          if (pushAmount > maxPushDistance) {
+            pushAmount = maxPushDistance;
+          }
+        }
+        
         const pushX = dist > 0 ? (dx / dist) * pushAmount : 0;
         const pushY = dist > 0 ? (dy / dist) * pushAmount : 0;
         return { x: pushX, y: pushY };
@@ -2906,11 +3346,28 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
           totalPushY += fpPush.y;
         }
 
+        // For web family, clamp the TOTAL displacement vector so dots never move more than 48px.
+        // (Per-panel clamping isn't enough once multiple panels contribute.)
+        const isWeb =
+          gridType === 'web_one' ||
+          gridType === 'quantum_web';
+        if (isWeb) {
+          const maxTotalDisplacement = 48;
+          const mag = Math.sqrt(totalPushX * totalPushX + totalPushY * totalPushY);
+          if (mag > maxTotalDisplacement && mag > 0) {
+            const s = maxTotalDisplacement / mag;
+            totalPushX *= s;
+            totalPushY *= s;
+          }
+        }
+
         return { x: baseX + totalPushX, y: baseY + totalPushY };
       };
 
       // Hidden dense grid - only visible during pulses
       // Draw at half the spacing (double density)
+      if (gridType === 'rectangular') {
+        // Only show dense grid for rectangular/hexagonal grids
       for (let gx = -denseGridSize; gx < width + denseGridSize * 2; gx += denseGridSize) {
         for (let gy = -denseGridSize; gy < height + denseGridSize * 2; gy += denseGridSize) {
           // Skip points that align with the main grid (they'll be drawn by the main wireframe)
@@ -2936,7 +3393,8 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
             ctx.beginPath();
             ctx.moveTo(pos.x, pos.y);
             ctx.lineTo(nextPosH.x, nextPosH.y);
-            ctx.strokeStyle = `rgba(37, 99, 235, ${avgPulseH * 0.9})`;
+              const { r: ar, g: ag, b: ab } = accentRgbRef.current;
+              ctx.strokeStyle = `rgba(${ar}, ${ag}, ${ab}, ${avgPulseH * 0.9})`;
             ctx.lineWidth = 0.3 + avgPulseH * 0.5;
             ctx.stroke();
           }
@@ -2952,9 +3410,11 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
             ctx.beginPath();
             ctx.moveTo(pos.x, pos.y);
             ctx.lineTo(nextPosV.x, nextPosV.y);
-            ctx.strokeStyle = `rgba(37, 99, 235, ${avgPulseV * 0.9})`;
+              const { r: ar2, g: ag2, b: ab2 } = accentRgbRef.current;
+              ctx.strokeStyle = `rgba(${ar2}, ${ag2}, ${ab2}, ${avgPulseV * 0.9})`;
             ctx.lineWidth = 0.3 + avgPulseV * 0.5;
             ctx.stroke();
+            }
           }
         }
       }
@@ -2963,14 +3423,116 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       ctx.lineWidth = 0.5;
       dotsRef.current.forEach((dot, key) => {
         const [gxStr, gyStr] = key.split(',');
+        
+        let neighbors: Array<{ key: string; dot: typeof dot | undefined }> = [];
+        
+        if (gridType === 'isometric') {
+          const isoX = parseInt(gxStr);
+          const isoY = parseInt(gyStr);
+          // In isometric grid, each dot connects to 3 neighbors:
+          // 1. Northeast: (isoX+1, isoY)
+          // 2. Southeast: (isoX, isoY+1)
+          // 3. East: (isoX+1, isoY-1) - this creates the diamond pattern
+          neighbors = [
+            { key: `${isoX + 1},${isoY}`, dot: dotsRef.current.get(`${isoX + 1},${isoY}`) },
+            { key: `${isoX},${isoY + 1}`, dot: dotsRef.current.get(`${isoX},${isoY + 1}`) },
+            { key: `${isoX + 1},${isoY - 1}`, dot: dotsRef.current.get(`${isoX + 1},${isoY - 1}`) },
+          ];
+        } else if (gridType === 'hexagonal') {
+          const q = parseInt(gxStr);
+          const r = parseInt(gyStr);
+          // Hexagonal grid: each hex connects to 6 neighbors
+          const hexNeighbors = getHexNeighbors(q, r);
+          neighbors = hexNeighbors.map(n => ({
+            key: `${n.q},${n.r}`,
+            dot: dotsRef.current.get(`${n.q},${n.r}`),
+          }));
+        } else if (gridType === 'web_one' || gridType === 'quantum_web') {
+          // Polar grid: parse the key format polar_ring_radial
+          if (key.startsWith('polar_')) {
+            const parts = key.split('_');
+            if (parts.length >= 3) {
+              const ring = parseInt(parts[1]);
+              const radial = parseInt(parts[2]);
+              
+              // Connect to next/prev on same ring (same radius, different angle)
+              const nextRadial = (radial + 1) % polarRadialLines;
+              const prevRadial = (radial - 1 + polarRadialLines) % polarRadialLines;
+              neighbors.push(
+                { key: `polar_${ring}_${nextRadial}`, dot: dotsRef.current.get(`polar_${ring}_${nextRadial}`) },
+                { key: `polar_${ring}_${prevRadial}`, dot: dotsRef.current.get(`polar_${ring}_${prevRadial}`) }
+              );
+              
+              // Connect to next/prev on same radial line (same angle, different radius)
+              if (ring > 0) {
+                neighbors.push({
+                  key: `polar_${ring - 1}_${radial}`,
+                  dot: dotsRef.current.get(`polar_${ring - 1}_${radial}`),
+                });
+              }
+              if (ring < polarRings) {
+                neighbors.push({
+                  key: `polar_${ring + 1}_${radial}`,
+                  dot: dotsRef.current.get(`polar_${ring + 1}_${radial}`),
+                });
+              }
+            }
+          }
+        } else if (gridType === 'triangular') {
+          // Triangular lattice neighbors (6 around each point)
+          if (key.startsWith('tri_')) {
+            const parts = key.split('_');
+            if (parts.length >= 3) {
+              const row = parseInt(parts[1]);
+              const col = parseInt(parts[2]);
+              const parity = row & 1;
+
+              const candidates = [
+                `tri_${row}_${col - 1}`,
+                `tri_${row}_${col + 1}`,
+                `tri_${row - 1}_${col - parity}`,
+                `tri_${row - 1}_${col - parity + 1}`,
+                `tri_${row + 1}_${col - parity}`,
+                `tri_${row + 1}_${col - parity + 1}`,
+              ];
+
+              neighbors = candidates.map(k => ({ key: k, dot: dotsRef.current.get(k) }));
+            }
+          }
+        } else if (gridType === 'mesh') {
+          // Mesh neighbors: 6-way connections on jittered grid indices
+          if (key.startsWith('mesh_')) {
+            const parts = key.split('_');
+            if (parts.length >= 3) {
+              const r = parseInt(parts[1]);
+              const c = parseInt(parts[2]);
+              const parity = r & 1;
+              const candidates = [
+                `mesh_${r}_${c - 1}`,
+                `mesh_${r}_${c + 1}`,
+                `mesh_${r - 1}_${c}`,
+                `mesh_${r + 1}_${c}`,
+                `mesh_${r - 1}_${c + (parity ? 1 : -1)}`,
+                `mesh_${r + 1}_${c + (parity ? 1 : -1)}`,
+              ];
+              neighbors = candidates.map(k => ({ key: k, dot: dotsRef.current.get(k) }));
+            }
+          }
+        } else if (gridType === 'constellation') {
+          const map = (dotsRef.current as unknown as { __constellation?: Map<string, string[]> }).__constellation;
+          const next = map?.get(key) ?? [];
+          neighbors = next.map(k => ({ key: k, dot: dotsRef.current.get(k) }));
+        } else {
+          // Rectangular grid: right and bottom
         const gx = parseInt(gxStr);
         const gy = parseInt(gyStr);
-
-        // Get neighbors (right and bottom)
         const rightKey = `${gx + gridSize},${gy}`;
         const bottomKey = `${gx},${gy + gridSize}`;
-        const rightDot = dotsRef.current.get(rightKey);
-        const bottomDot = dotsRef.current.get(bottomKey);
+          neighbors = [
+            { key: rightKey, dot: dotsRef.current.get(rightKey) },
+            { key: bottomKey, dot: dotsRef.current.get(bottomKey) },
+          ];
+        }
 
         // Calculate opacity based on distance from closest panel
         let lineMinDist = Infinity;
@@ -2997,56 +3559,118 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
         // Combined effect intensity
         const effectIntensity = Math.max(pulseIntensity, hoverIntensity);
 
-        if (rightDot) {
-          const avgPulse = (pulseIntensity + getPulseIntensity(rightDot.x, rightDot.y)) / 2;
-          const avgHover = (hoverIntensity + getHoverIntensity(rightDot.x, rightDot.y)) / 2;
+        // Draw lines to all neighbors
+        neighbors.forEach(({ key: neighborKey, dot: neighborDot }) => {
+          if (!neighborDot) return;
+
+          const avgPulse = (pulseIntensity + getPulseIntensity(neighborDot.x, neighborDot.y)) / 2;
+          const avgHover = (hoverIntensity + getHoverIntensity(neighborDot.x, neighborDot.y)) / 2;
           const avgEffect = Math.max(avgPulse, avgHover);
           const lineOpacity = baseLineOpacity + avgEffect * 0.8;
-          // Keep it blue - #2563EB base (37, 99, 235)
-          const lineColor = avgEffect > 0.1
-            ? `rgba(37, ${99 + avgEffect * 60}, 235, ${Math.max(0, lineOpacity + avgEffect * 0.7)})`
-            : `rgba(160, 160, 160, ${Math.max(0, lineOpacity)})`;
 
-          if (lineOpacity > 0.01) {
+          const { r: ar, g: ag, b: ab } = accentRgbRef.current;
+          const isLight = themeRef.current === 'light';
+          const baseGrey = isLight ? 40 : 160;
+          const lineColor = avgEffect > 0.1
+            ? `rgba(${ar}, ${Math.min(255, ag + avgEffect * 60)}, ${ab}, ${Math.max(0, lineOpacity + avgEffect * 0.7)})`
+            : `rgba(${baseGrey}, ${baseGrey}, ${baseGrey}, ${Math.max(0, lineOpacity)})`;
+
+          if (lineOpacity <= 0.01) return;
+
             ctx.beginPath();
             ctx.moveTo(dot.x, dot.y);
-            ctx.lineTo(rightDot.x, rightDot.y);
+
+          if ((gridType === 'quantum_web') && key.startsWith('polar_') && neighborKey?.startsWith('polar_')) {
+            // Quantum Web: Bezier webbing (deterministic subtle curve per edge)
+            const partsA = key.split('_');
+            const partsB = neighborKey.split('_');
+            const ringA = parseInt(partsA[1] || '0', 10);
+            const radialA = parseInt(partsA[2] || '0', 10);
+            const ringB = parseInt(partsB[1] || '0', 10);
+            const radialB = parseInt(partsB[2] || '0', 10);
+
+            const x0 = dot.x, y0 = dot.y;
+            const x3 = neighborDot.x, y3 = neighborDot.y;
+            const dx = x3 - x0;
+            const dy = y3 - y0;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const nx = -dy / len;
+            const ny = dx / len;
+
+            const sign = ((ringA + radialA + ringB + radialB) & 1) ? 1 : -1;
+            const baseMag = Math.min(22, 6 + Math.max(ringA, ringB) * 0.35);
+            const mag = (baseMag + avgEffect * 10) * sign;
+
+            const x1 = x0 + dx / 3;
+            const y1 = y0 + dy / 3;
+            const x2 = x0 + (2 * dx) / 3;
+            const y2 = y0 + (2 * dy) / 3;
+
+            ctx.bezierCurveTo(
+              x1 + nx * mag, y1 + ny * mag,
+              x2 + nx * mag, y2 + ny * mag,
+              x3, y3
+            );
+          } else {
+            ctx.lineTo(neighborDot.x, neighborDot.y);
+          }
+
             ctx.lineWidth = 0.5 + avgEffect * 2;
             ctx.strokeStyle = lineColor;
             ctx.stroke();
-          }
-        }
-
-        if (bottomDot) {
-          const avgPulse = (pulseIntensity + getPulseIntensity(bottomDot.x, bottomDot.y)) / 2;
-          const avgHover = (hoverIntensity + getHoverIntensity(bottomDot.x, bottomDot.y)) / 2;
-          const avgEffect = Math.max(avgPulse, avgHover);
-          const lineOpacity = baseLineOpacity + avgEffect * 0.8;
-          // Keep it blue - #2563EB base (37, 99, 235)
-          const lineColor = avgEffect > 0.1
-            ? `rgba(37, ${99 + avgEffect * 60}, 235, ${Math.max(0, lineOpacity + avgEffect * 0.7)})`
-            : `rgba(160, 160, 160, ${Math.max(0, lineOpacity)})`;
-
-          if (lineOpacity > 0.01) {
-            ctx.beginPath();
-            ctx.moveTo(dot.x, dot.y);
-            ctx.lineTo(bottomDot.x, bottomDot.y);
-            ctx.lineWidth = 0.5 + avgEffect * 2;
-            ctx.strokeStyle = lineColor;
-            ctx.stroke();
-          }
-        }
+        });
       });
 
       // Second pass: draw dots on top
       dotsRef.current.forEach((dot, key) => {
+        let baseX: number, baseY: number;
+        
+        if (gridType === 'isometric') {
+          const [gxStr, gyStr] = key.split(',');
+          const isoX = parseInt(gxStr);
+          const isoY = parseInt(gyStr);
+          const screen = isometricToScreen(isoX, isoY);
+          const offsetX = width / 2;
+          const offsetY = height / 2;
+          baseX = screen.x + offsetX;
+          baseY = screen.y + offsetY;
+        } else if (gridType === 'hexagonal') {
+          const [gxStr, gyStr] = key.split(',');
+          const q = parseInt(gxStr);
+          const r = parseInt(gyStr);
+          const screen = hexToScreen(q, r);
+          const offsetX = width / 2;
+          const offsetY = height / 2;
+          baseX = screen.x + offsetX;
+          baseY = screen.y + offsetY;
+        } else if (gridType === 'web_one' || gridType === 'quantum_web') {
+          // Web family: anchor to stable rest position
+          baseX = dot.baseX;
+          baseY = dot.baseY;
+        } else if (gridType === 'triangular') {
+          // For triangular lattice, use stable rest position
+          baseX = dot.baseX;
+          baseY = dot.baseY;
+        } else if (gridType === 'mesh') {
+          // For mesh, use stable rest position
+          baseX = dot.baseX;
+          baseY = dot.baseY;
+        } else if (gridType === 'flux') {
+          // For flux, use stable rest position (warped lattice)
+          baseX = dot.baseX;
+          baseY = dot.baseY;
+        } else if (gridType === 'constellation') {
+          // For constellation, use stable rest position (star field)
+          baseX = dot.baseX;
+          baseY = dot.baseY;
+        } else {
         const [gxStr, gyStr] = key.split(',');
         const gx = parseInt(gxStr);
         const gy = parseInt(gyStr);
-
         // Base position with parallax
-        const baseX = gx + offsetX;
-        const baseY = gy + offsetY;
+          baseX = gx + offsetX;
+          baseY = gy + offsetY;
+        }
 
         // Calculate target displacement from ALL panels
         let totalPushX = 0;
@@ -3134,16 +3758,129 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       };
 
       // Snap to nearest grid coordinate (returns base grid coords, not actual position)
-      const snapToGridCoords = (x: number, y: number) => ({
+      const snapToGridCoords = (x: number, y: number) => {
+        if (gridType === 'isometric') {
+          // Convert screen to isometric, then round to nearest grid point
+          const offsetX = width / 2;
+          const offsetY = height / 2;
+          const relX = x - offsetX;
+          const relY = y - offsetY;
+          const { isoX, isoY } = screenToIsometric(relX, relY);
+          return { gx: Math.round(isoX), gy: Math.round(isoY) };
+        } else if (gridType === 'hexagonal') {
+          const offsetX = width / 2;
+          const offsetY = height / 2;
+          const relX = x - offsetX;
+          const relY = y - offsetY;
+          const { q, r } = screenToHex(relX, relY);
+          return { gx: q, gy: r };
+        } else if (gridType === 'web_one' || gridType === 'quantum_web') {
+          // For polar, find nearest dot
+          let nearestKey = '';
+          let minDist = Infinity;
+          
+          dotsRef.current.forEach((d, k) => {
+            if (k.startsWith('polar_')) {
+              const dist = Math.sqrt((d.x - x) ** 2 + (d.y - y) ** 2);
+              if (dist < minDist) {
+                minDist = dist;
+                nearestKey = k;
+              }
+            }
+          });
+          return { gx: 0, gy: 0, key: nearestKey };
+        } else if (gridType === 'constellation') {
+          // For constellation, find nearest star
+          let nearestKey = '';
+          let minDist = Infinity;
+          dotsRef.current.forEach((d, k) => {
+            if (!k.startsWith('star_')) return;
+            const dist = Math.sqrt((d.x - x) ** 2 + (d.y - y) ** 2);
+            if (dist < minDist) {
+              minDist = dist;
+              nearestKey = k;
+            }
+          });
+          return { gx: 0, gy: 0, key: nearestKey };
+        } else if (gridType === 'triangular') {
+          // For triangular, find nearest dot
+          let nearestKey = '';
+          let minDist = Infinity;
+
+          dotsRef.current.forEach((d, k) => {
+            if (k.startsWith('tri_')) {
+              const dist = Math.sqrt((d.x - x) ** 2 + (d.y - y) ** 2);
+              if (dist < minDist) {
+                minDist = dist;
+                nearestKey = k;
+              }
+            }
+          });
+          return { gx: 0, gy: 0, key: nearestKey };
+        } else if (gridType === 'mesh') {
+          // For mesh, find nearest dot
+          let nearestKey = '';
+          let minDist = Infinity;
+          dotsRef.current.forEach((d, k) => {
+            if (!k.startsWith('mesh_')) return;
+            const dist = Math.sqrt((d.x - x) ** 2 + (d.y - y) ** 2);
+            if (dist < minDist) {
+              minDist = dist;
+              nearestKey = k;
+            }
+          });
+          return { gx: 0, gy: 0, key: nearestKey };
+        } else if (gridType === 'flux') {
+          // For flux, find nearest dot among rectangular keys
+          let nearestKey = '';
+          let minDist = Infinity;
+
+          dotsRef.current.forEach((d, k) => {
+            if (k.includes(',') && !k.startsWith('polar_') && !k.startsWith('tri_')) {
+              const dist = Math.sqrt((d.x - x) ** 2 + (d.y - y) ** 2);
+              if (dist < minDist) {
+                minDist = dist;
+                nearestKey = k;
+              }
+            }
+          });
+
+          if (nearestKey) {
+            const [gxStr, gyStr] = nearestKey.split(',');
+            const gx = parseInt(gxStr, 10);
+            const gy = parseInt(gyStr, 10);
+            return { gx, gy, key: nearestKey };
+          }
+
+          return { gx: Math.round(x / gridSize) * gridSize, gy: Math.round(y / gridSize) * gridSize };
+        } else {
+          return {
         gx: Math.round(x / gridSize) * gridSize,
         gy: Math.round(y / gridSize) * gridSize,
-      });
+          };
+        }
+      };
 
       // Get actual deformed dot position from grid coordinates
-      const getDotPos = (gx: number, gy: number) => {
-        const key = `${gx},${gy}`;
-        const dot = dots.get(key);
-        return dot ? { x: dot.x, y: dot.y } : { x: gx, y: gy };
+      const getDotPos = (gx: number, gy: number, key?: string) => {
+        let dotKey = key || `${gx},${gy}`;
+        const dot = dots.get(dotKey);
+        if (dot) return { x: dot.x, y: dot.y };
+        
+        // Fallback: convert grid coords to screen coords
+        if (gridType === 'isometric') {
+          const screen = isometricToScreen(gx, gy);
+          const offsetX = width / 2;
+          const offsetY = height / 2;
+          return { x: screen.x + offsetX, y: screen.y + offsetY };
+        } else if (gridType === 'hexagonal') {
+          const screen = hexToScreen(gx, gy);
+          const offsetX = width / 2;
+          const offsetY = height / 2;
+          return { x: screen.x + offsetX, y: screen.y + offsetY };
+        }
+        
+        return { x: gx, y: gy };
       };
 
       // Helper to check if a point is inside a panel (with margin)
@@ -3153,11 +3890,12 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       };
 
       // Helper to check if a path collides with any panel (except excluded ones)
-      const pathCollidesWithPanels = (points: { gx: number; gy: number }[], excludePanelIds: string[]) => {
+      const pathCollidesWithPanels = (points: Array<{ gx: number; gy: number; key?: string }>, excludePanelIds: string[]) => {
         for (const point of points) {
+          const pos = getDotPos(point.gx, point.gy, point.key);
           for (const panel of currentPanels) {
             if (excludePanelIds.includes(panel.id)) continue;
-            if (isPointInPanel(point.gx, point.gy, panel)) {
+            if (isPointInPanel(pos.x, pos.y, panel)) {
               return true;
             }
           }
@@ -3166,9 +3904,223 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       };
 
       // Build an L-shaped path (horizontal first or vertical first)
-      const buildLPath = (startGrid: { gx: number; gy: number }, endGrid: { gx: number; gy: number }, horizontalFirst: boolean) => {
-        const pathPoints: { gx: number; gy: number }[] = [];
+      // For isometric, uses diagonal movement along grid axes
+      const buildLPath = (startGrid: { gx: number; gy: number; key?: string }, endGrid: { gx: number; gy: number; key?: string }, horizontalFirst: boolean) => {
+        const pathPoints: Array<{ gx: number; gy: number; key?: string }> = [];
 
+        if (gridType === 'isometric') {
+          // For isometric, move along the three axes: northeast, southeast, or east
+          let currentX = startGrid.gx;
+          let currentY = startGrid.gy;
+          pathPoints.push({ gx: currentX, gy: currentY });
+
+          // Simple pathfinding: move in the direction that reduces distance most
+          while (currentX !== endGrid.gx || currentY !== endGrid.gy) {
+            const dx = endGrid.gx - currentX;
+            const dy = endGrid.gy - currentY;
+
+            // Try moving in the direction that reduces distance most
+            if (Math.abs(dx) > Math.abs(dy)) {
+              // Move east/west
+              currentX += dx > 0 ? 1 : -1;
+            } else if (dy !== 0) {
+              // Move southeast/northwest
+              currentY += dy > 0 ? 1 : -1;
+            } else {
+              // Move northeast/southwest (diagonal)
+              currentX += dx > 0 ? 1 : -1;
+              currentY += dy > 0 ? -1 : 1;
+            }
+
+            pathPoints.push({ gx: currentX, gy: currentY });
+            
+            // Safety check to prevent infinite loops
+            if (pathPoints.length > 100) break;
+          }
+        } else if (gridType === 'hexagonal') {
+          // Hexagonal pathfinding using axial coordinates
+          let currentQ = startGrid.gx;
+          let currentR = startGrid.gy;
+          pathPoints.push({ gx: currentQ, gy: currentR });
+
+          while (currentQ !== endGrid.gx || currentR !== endGrid.gy) {
+            const dq = endGrid.gx - currentQ;
+            const dr = endGrid.gy - currentR;
+            
+            // Move in the direction that reduces distance most
+            if (Math.abs(dq) > Math.abs(dr)) {
+              currentQ += dq > 0 ? 1 : -1;
+            } else if (dr !== 0) {
+              currentR += dr > 0 ? 1 : -1;
+            } else {
+              // Move diagonally
+              currentQ += dq > 0 ? 1 : -1;
+              currentR += dr > 0 ? -1 : 1;
+            }
+
+            pathPoints.push({ gx: currentQ, gy: currentR });
+            if (pathPoints.length > 100) break;
+          }
+        } else if (gridType === 'web_one' || gridType === 'quantum_web') {
+          // Web family: pathfind through polar coordinates
+          const startKey = startGrid.key || `${startGrid.gx},${startGrid.gy}`;
+          const endKey = endGrid.key || `${endGrid.gx},${endGrid.gy}`;
+          
+          if (startKey.startsWith('polar_') && endKey.startsWith('polar_')) {
+            const startParts = startKey.split('_');
+            const endParts = endKey.split('_');
+            if (startParts.length >= 3 && endParts.length >= 3) {
+              let ring = parseInt(startParts[1]);
+              let radial = parseInt(startParts[2]);
+              const endRing = parseInt(endParts[1]);
+              const endRadial = parseInt(endParts[2]);
+              
+              pathPoints.push({ gx: ring, gy: radial, key: startKey });
+              
+              // Move through rings first, then radial
+              while (ring !== endRing) {
+                ring += ring < endRing ? 1 : -1;
+                const key = `polar_${ring}_${radial}`;
+                if (dotsRef.current.has(key)) {
+                  pathPoints.push({ gx: ring, gy: radial, key });
+                }
+                if (pathPoints.length > 100) break;
+              }
+              
+              // Then move radial (handle wrap-around)
+              while (radial !== endRadial) {
+                const diff = ((endRadial - radial + polarRadialLines) % polarRadialLines);
+                const forward = diff <= polarRadialLines / 2;
+                radial = (radial + (forward ? 1 : -1) + polarRadialLines) % polarRadialLines;
+                const key = `polar_${ring}_${radial}`;
+                if (dotsRef.current.has(key)) {
+                  pathPoints.push({ gx: ring, gy: radial, key });
+                }
+                if (pathPoints.length > 100) break;
+              }
+              
+              if (pathPoints[pathPoints.length - 1].key !== endKey) {
+                pathPoints.push({ gx: endRing, gy: endRadial, key: endKey });
+              }
+            }
+          } else {
+            pathPoints.push({ gx: startGrid.gx, gy: startGrid.gy, key: startKey });
+            pathPoints.push({ gx: endGrid.gx, gy: endGrid.gy, key: endKey });
+          }
+        } else if (gridType === 'triangular') {
+          // Triangular lattice: shortest path over neighbor graph (BFS)
+          const startKey = startGrid.key || `${startGrid.gx},${startGrid.gy}`;
+          const endKey = endGrid.key || `${endGrid.gx},${endGrid.gy}`;
+
+          if (startKey.startsWith('tri_') && endKey.startsWith('tri_') && startKey !== '' && endKey !== '') {
+            const parse = (k: string) => {
+              const parts = k.split('_');
+              return { row: parseInt(parts[1]), col: parseInt(parts[2]) };
+            };
+            const neighborsOf = (k: string) => {
+              const { row, col } = parse(k);
+              const parity = row & 1;
+              const candidates = [
+                `tri_${row}_${col - 1}`,
+                `tri_${row}_${col + 1}`,
+                `tri_${row - 1}_${col - parity}`,
+                `tri_${row - 1}_${col - parity + 1}`,
+                `tri_${row + 1}_${col - parity}`,
+                `tri_${row + 1}_${col - parity + 1}`,
+              ];
+              return candidates.filter(c => dotsRef.current.has(c));
+            };
+
+            const queue: string[] = [startKey];
+            const prev = new Map<string, string | null>();
+            prev.set(startKey, null);
+
+            while (queue.length) {
+              const cur = queue.shift()!;
+              if (cur === endKey) break;
+              for (const n of neighborsOf(cur)) {
+                if (prev.has(n)) continue;
+                prev.set(n, cur);
+                queue.push(n);
+              }
+              if (prev.size > 2000) break; // safety
+            }
+
+            if (prev.has(endKey)) {
+              const pathKeys: string[] = [];
+              let cur: string | null = endKey;
+              while (cur) {
+                pathKeys.push(cur);
+                cur = prev.get(cur) ?? null;
+              }
+              pathKeys.reverse();
+              for (const k of pathKeys) pathPoints.push({ gx: 0, gy: 0, key: k });
+            } else {
+              // fallback direct
+              pathPoints.push({ gx: 0, gy: 0, key: startKey });
+              pathPoints.push({ gx: 0, gy: 0, key: endKey });
+            }
+          } else {
+            pathPoints.push({ gx: startGrid.gx, gy: startGrid.gy, key: startKey });
+            pathPoints.push({ gx: endGrid.gx, gy: endGrid.gy, key: endKey });
+          }
+        } else if (gridType === 'mesh') {
+          // Mesh: BFS over neighbor graph (same topology as neighbors section)
+          const startKey = startGrid.key || `${startGrid.gx},${startGrid.gy}`;
+          const endKey = endGrid.key || `${endGrid.gx},${endGrid.gy}`;
+
+          if (startKey.startsWith('mesh_') && endKey.startsWith('mesh_') && startKey !== '' && endKey !== '') {
+            const parse = (k: string) => {
+              const parts = k.split('_');
+              return { r: parseInt(parts[1]), c: parseInt(parts[2]) };
+            };
+            const neighborsOf = (k: string) => {
+              const { r, c } = parse(k);
+              const parity = r & 1;
+              const candidates = [
+                `mesh_${r}_${c - 1}`,
+                `mesh_${r}_${c + 1}`,
+                `mesh_${r - 1}_${c}`,
+                `mesh_${r + 1}_${c}`,
+                `mesh_${r - 1}_${c + (parity ? 1 : -1)}`,
+                `mesh_${r + 1}_${c + (parity ? 1 : -1)}`,
+              ];
+              return candidates.filter(cand => dotsRef.current.has(cand));
+            };
+
+            const queue: string[] = [startKey];
+            const prev = new Map<string, string | null>();
+            prev.set(startKey, null);
+            while (queue.length) {
+              const cur = queue.shift()!;
+              if (cur === endKey) break;
+              for (const n of neighborsOf(cur)) {
+                if (prev.has(n)) continue;
+                prev.set(n, cur);
+                queue.push(n);
+              }
+              if (prev.size > 4000) break;
+            }
+
+            if (prev.has(endKey)) {
+              const pathKeys: string[] = [];
+              let cur: string | null = endKey;
+              while (cur) {
+                pathKeys.push(cur);
+                cur = prev.get(cur) ?? null;
+              }
+              pathKeys.reverse();
+              for (const k of pathKeys) pathPoints.push({ gx: 0, gy: 0, key: k });
+            } else {
+              pathPoints.push({ gx: 0, gy: 0, key: startKey });
+              pathPoints.push({ gx: 0, gy: 0, key: endKey });
+            }
+          } else {
+            pathPoints.push({ gx: startGrid.gx, gy: startGrid.gy, key: startKey });
+            pathPoints.push({ gx: endGrid.gx, gy: endGrid.gy, key: endKey });
+          }
+        } else {
+          // Rectangular grid path
         if (horizontalFirst) {
           // Horizontal then vertical
           const xStep = startGrid.gx < endGrid.gx ? gridSize : -gridSize;
@@ -3199,6 +4151,7 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
           if (startGrid.gx !== endGrid.gx) {
             for (let gx = startGrid.gx + xStep; xStep > 0 ? gx <= endGrid.gx : gx >= endGrid.gx; gx += xStep) {
               pathPoints.push({ gx, gy: endGrid.gy });
+              }
             }
           }
         }
@@ -3235,7 +4188,7 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
         if (pathPoints.length < 2) return;
 
         // Get actual deformed positions for all path points
-        const actualPoints = pathPoints.map(p => getDotPos(p.gx, p.gy));
+        const actualPoints = pathPoints.map(p => getDotPos(p.gx, p.gy, p.key));
 
         ctx.save();
         ctx.strokeStyle = color;
@@ -3400,7 +4353,8 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
         const from = getPanelCenter(conn.fromPanelId);
         const to = getPanelCenter(conn.toPanelId);
         if (from && to) {
-          drawGridPath(from.x, from.y, to.x, to.y, '#3B82F6', 2, 0.7, [conn.fromPanelId, conn.toPanelId], true);
+          const { r: ar, g: ag, b: ab } = accentRgbRef.current;
+          drawGridPath(from.x, from.y, to.x, to.y, `rgb(${ar}, ${ag}, ${ab})`, 2, 0.7, [conn.fromPanelId, conn.toPanelId], true);
         }
       }
 
@@ -3459,7 +4413,10 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
 
           if (progress < 1) {
             ctx.save();
-            ctx.strokeStyle = '#3B82F6';
+            {
+              const { r: ar, g: ag, b: ab } = accentRgbRef.current;
+              ctx.strokeStyle = `rgb(${ar}, ${ag}, ${ab})`;
+            }
             ctx.lineWidth = 2;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
@@ -3534,7 +4491,12 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
         if (from) {
           // Grey while dragging, blue when over valid target
           const alpha = currentDrag.targetPanelId ? 0.85 : 0.5;
-          const color = currentDrag.targetPanelId ? '#3B82F6' : '#888888';
+          const color = currentDrag.targetPanelId
+            ? (() => {
+                const { r: ar, g: ag, b: ab } = accentRgbRef.current;
+                return `rgb(${ar}, ${ag}, ${ab})`;
+              })()
+            : '#888888';
           const excludeIds = currentDrag.targetPanelId
             ? [currentDrag.fromPanelId, currentDrag.targetPanelId]
             : [currentDrag.fromPanelId];
@@ -3599,7 +4561,7 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       height = window.innerHeight;
       canvas.width = width;
       canvas.height = height;
-      initDots();
+      initDots(gridTypeRef.current);
     };
 
     window.addEventListener('resize', handleResize);
@@ -3644,6 +4606,26 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
     onCutAnimationCompleteRef.current = onCutAnimationComplete;
   }, [onCutAnimationComplete]);
 
+  useEffect(() => {
+    themeRef.current = theme;
+  }, [theme]);
+
+  useEffect(() => {
+    const hex = (accentHex || '').trim();
+    const m = hex.match(/^#?([0-9a-fA-F]{6})$/);
+    if (!m) return;
+    const v = m[1];
+    accentRgbRef.current = {
+      r: parseInt(v.slice(0, 2), 16),
+      g: parseInt(v.slice(2, 4), 16),
+      b: parseInt(v.slice(4, 6), 16),
+    };
+  }, [accentHex]);
+
+  useEffect(() => {
+    gridTypeRef.current = gridType;
+  }, [gridType]);
+
   return (
     <canvas
       ref={canvasRef}
@@ -3660,6 +4642,17 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
   );
 }
 
+type GridType =
+  | 'rectangular'
+  | 'hexagonal'
+  | 'isometric'
+  | 'web_one'
+  | 'quantum_web'
+  | 'triangular'
+  | 'mesh'
+  | 'flux'
+  | 'constellation';
+
 export default function GridPlayground() {
   const router = useRouter();
   const [config] = useState<PhysicsConfig>(DEFAULT_CONFIG);
@@ -3670,6 +4663,10 @@ export default function GridPlayground() {
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const [floatingPanels, setFloatingPanels] = useState<FloatingPanelData[]>([]);
   const [canvasResetKey, setCanvasResetKey] = useState(0);
+  const [gridType, setGridType] = useState<GridType>('rectangular');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [accentHex, setAccentHex] = useState<string>('#2563eb');
+  const exportCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const panelIdCounter = useRef(1); // Start at 1 since we have a default panel
   const hasSpawnedDefaultPanel = useRef(false);
   const isDraggingRef = useRef(false); // Track if any panel is being dragged
@@ -3685,6 +4682,35 @@ export default function GridPlayground() {
   const touchedGridDotsRef = useRef<Set<string>>(new Set()); // Track grid dots touched during connection drag
   const lastDotSoundTimeRef = useRef(0); // Throttle dot sounds when moving fast
 
+  const GRID_STORY: GridType[] = [
+    'rectangular',
+    'hexagonal',
+    'isometric',
+    'web_one',
+    'quantum_web',
+    'triangular',
+    'mesh',
+    'flux',
+    'constellation',
+  ];
+
+  // Keyboard: ArrowRight / ArrowDown advances the grid story
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      e.stopPropagation();
+      soundEffects.playQuickStartClick();
+      setGridType(prev => {
+        const idx = GRID_STORY.indexOf(prev);
+        const next = GRID_STORY[(idx >= 0 ? idx + 1 : 0) % GRID_STORY.length];
+        return next;
+      });
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
+
   // Disable CSS zoom on this page for proper canvas alignment
   useEffect(() => {
     document.documentElement.classList.add('no-zoom');
@@ -3692,6 +4718,80 @@ export default function GridPlayground() {
       document.documentElement.classList.remove('no-zoom');
     };
   }, []);
+
+  // Apply theme + accent to CSS variables
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  useEffect(() => {
+    const hex = (accentHex || '').trim();
+    const m = hex.match(/^#?([0-9a-fA-F]{6})$/);
+    if (!m) return;
+    const v = m[1].toLowerCase();
+    const normalized = `#${v}`;
+    const r = parseInt(v.slice(0, 2), 16);
+    const g = parseInt(v.slice(2, 4), 16);
+    const b = parseInt(v.slice(4, 6), 16);
+    document.documentElement.style.setProperty('--accent', normalized);
+    document.documentElement.style.setProperty('--accent-rgb', `${r}, ${g}, ${b}`);
+  }, [accentHex]);
+
+  const exportImage = useCallback(async (format: 'png' | 'jpeg') => {
+    const canvas = exportCanvasRef.current;
+    if (!canvas) return;
+    const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+    const ext = format === 'png' ? 'png' : 'jpg';
+    const fileName = `grid-${gridType}-${Date.now()}.${ext}`;
+
+    // Prefer toBlob (better memory) but fallback to data URL
+    const blob: Blob | null = await new Promise(resolve => {
+      if ('toBlob' in canvas) {
+        canvas.toBlob(b => resolve(b), mime, 0.92);
+      } else {
+        resolve(null);
+      }
+    });
+
+    if (blob) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return;
+    }
+
+    const dataUrl = canvas.toDataURL(mime, 0.92);
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = fileName;
+    a.click();
+  }, [gridType]);
+
+  const copyReactTailwindCode = useCallback(async () => {
+    const code = `import React from 'react';
+
+export function NodeGridStory() {
+  return (
+    <div className="relative h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-fg)]">
+      {/* Your Node Grid Canvas component goes here. */}
+      <div className="absolute right-8 top-8 flex items-center gap-2">
+        <button className="rounded-lg border border-[var(--btn-outline)] bg-white/10 px-3 py-2 text-xs font-semibold">
+          {/* Theme */}
+        </button>
+        <input type="color" defaultValue="${accentHex}" className="h-8 w-8 cursor-pointer rounded-lg border border-[var(--btn-outline)] bg-transparent p-0" />
+        <input defaultValue="${accentHex}" className="w-28 rounded-lg border border-[var(--btn-outline)] bg-white/10 px-2 py-2 font-mono text-xs outline-none" />
+      </div>
+      <div className="pointer-events-none absolute inset-0" />
+    </div>
+  );
+}
+`;
+
+    await navigator.clipboard.writeText(code);
+  }, [accentHex]);
 
   // Clear all panels and connections with animation
   const clearAll = useCallback(() => {
@@ -4002,6 +5102,8 @@ export default function GridPlayground() {
           if (lineSegmentsIntersect(lastX, lastY, currX, currY, seg.x1, seg.y1, seg.x2, seg.y2)) {
             setCutConnections(prev => [...prev, {
               ...conn,
+              cutX: currX,
+              cutY: currY,
               cutTime: now,
             }]);
             setConnections(prev => prev.filter(c => c.id !== conn.id));
@@ -4337,9 +5439,9 @@ export default function GridPlayground() {
     <div
       style={{
         minHeight: '100vh',
-        color: '#fff',
+        color: 'var(--app-fg)',
         position: 'relative',
-        backgroundColor: '#171717', /* neutral-900 */
+        backgroundColor: 'var(--app-bg)',
       }}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
@@ -4411,6 +5513,10 @@ export default function GridPlayground() {
         sliceTrail={sliceTrail}
         cutConnections={cutConnections}
         onCutAnimationComplete={handleCutAnimationComplete}
+        gridType={gridType}
+        theme={theme}
+        accentHex={accentHex}
+        onCanvasReady={(c) => { exportCanvasRef.current = c; }}
       />
 
       {/* Robot Logo - Top Left */}
@@ -4431,7 +5537,7 @@ export default function GridPlayground() {
             justifyContent: 'center',
             cursor: 'pointer',
             border: 'none',
-            boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px #171717',
+            boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px var(--app-bg)',
           }}
         >
           <span
@@ -4448,7 +5554,197 @@ export default function GridPlayground() {
         </button>
       </div>
 
-      {/* Clear All - Top Right (only visible with 2+ panels) */}
+      {/* Grid Type Selector - Top Right */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 32,
+          right: 32,
+          zIndex: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          alignItems: 'flex-end',
+        }}
+      >
+        {/* Theme + accent */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              soundEffects.playQuickStartClick();
+              setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+            }}
+            onMouseEnter={() => soundEffects.playHoverSound('theme')}
+            style={{
+              padding: '6px 10px',
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--app-fg)',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              border: `1px solid var(--btn-outline)`,
+              borderRadius: 8,
+              cursor: 'pointer',
+            }}
+            title="Toggle light/dark"
+          >
+            {theme === 'dark' ? 'Dark' : 'Light'}
+          </button>
+
+          <input
+            type="color"
+            value={(() => {
+              const m = (accentHex || '').trim().match(/^#?([0-9a-fA-F]{6})$/);
+              return m ? `#${m[1].toLowerCase()}` : '#2563eb';
+            })()}
+            onChange={(e) => setAccentHex(e.target.value)}
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              border: `1px solid var(--btn-outline)`,
+              background: 'transparent',
+              padding: 0,
+              cursor: 'pointer',
+            }}
+            title="Accent color"
+          />
+
+          <input
+            value={accentHex}
+            onChange={(e) => setAccentHex(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            placeholder="#2563eb"
+            style={{
+              width: 96,
+              padding: '6px 8px',
+              fontSize: 11,
+              color: 'var(--app-fg)',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              border: `1px solid var(--btn-outline)`,
+              borderRadius: 8,
+              outline: 'none',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            }}
+          />
+        </div>
+
+        {/* Export */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); exportImage('png'); }}
+            onMouseEnter={() => soundEffects.playHoverSound('export-png')}
+            style={{
+              padding: '6px 10px',
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--app-fg)',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              border: `1px solid var(--btn-outline)`,
+              borderRadius: 8,
+              cursor: 'pointer',
+            }}
+            title="Download PNG"
+          >
+            PNG
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); exportImage('jpeg'); }}
+            onMouseEnter={() => soundEffects.playHoverSound('export-jpeg')}
+            style={{
+              padding: '6px 10px',
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--app-fg)',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              border: `1px solid var(--btn-outline)`,
+              borderRadius: 8,
+              cursor: 'pointer',
+            }}
+            title="Download JPEG"
+          >
+            JPEG
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); copyReactTailwindCode(); }}
+            onMouseEnter={() => soundEffects.playHoverSound('copy-code')}
+            style={{
+              padding: '6px 10px',
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--app-fg)',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              border: `1px solid var(--btn-outline)`,
+              borderRadius: 8,
+              cursor: 'pointer',
+            }}
+            title="Copy React + Tailwind code"
+          >
+            Copy Code
+          </button>
+        </div>
+
+        {/* Grid Type Selector */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 4,
+            backgroundColor: 'rgba(255,255,255,0.05)',
+            padding: 4,
+            borderRadius: 8,
+            border: `1px solid var(--btn-outline)`,
+          }}
+        >
+          {([
+            'rectangular',
+            'hexagonal',
+            'isometric',
+            'web_one',
+            'quantum_web',
+            'triangular',
+            'mesh',
+            'flux',
+            'constellation',
+          ] as GridType[]).map((type) => {
+            const label =
+              type === 'web_one' ? 'Web One' :
+              type === 'quantum_web' ? 'Quantum Web' :
+              type === 'triangular' ? 'Truss' :
+              type === 'mesh' ? 'Mesh' :
+              type === 'flux' ? 'Flux' :
+              type === 'constellation' ? 'Constellation' :
+              type.charAt(0).toUpperCase() + type.slice(1);
+            return (
+            <button
+              key={type}
+              onClick={(e) => {
+                e.stopPropagation();
+                soundEffects.playQuickStartClick();
+                setGridType(type);
+                setCanvasResetKey(k => k + 1);
+              }}
+              onMouseEnter={() => soundEffects.playHoverSound('grid-type')}
+              style={{
+                padding: '6px 12px',
+                fontSize: 11,
+                fontWeight: gridType === type ? 600 : 400,
+                color: gridType === type ? 'var(--app-fg)' : 'var(--muted-fg)',
+                backgroundColor: gridType === type ? 'rgba(var(--accent-rgb), 0.25)' : 'transparent',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                textTransform: 'none',
+              }}
+            >
+              {label}
+            </button>
+            );
+          })}
+        </div>
+
+        {/* Clear All (only visible with 2+ panels) */}
       <AnimatePresence>
         {floatingPanels.filter(p => !p.isExiting).length >= 2 && (
           <motion.div
@@ -4463,29 +5759,26 @@ export default function GridPlayground() {
             }}
             onMouseEnter={() => soundEffects.playHoverSound('clear-all')}
             style={{
-              position: 'fixed',
-              top: 32,
-              right: 32,
-              zIndex: 10,
               display: 'flex',
               alignItems: 'center',
               gap: 10,
               cursor: 'pointer',
             }}
           >
-            <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>Clear all</span>
+            <span style={{ fontSize: 12, color: 'var(--muted-fg-2)' }}>Clear all</span>
             <span style={{
               padding: '3px 7px',
               backgroundColor: 'rgba(255,255,255,0.08)',
               borderRadius: 4,
               fontSize: 11,
               fontWeight: 500,
-              color: 'rgba(255,255,255,0.45)',
+              color: 'var(--muted-fg)',
               fontFamily: 'monospace',
             }}>ESC</span>
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
 
       {/* Title and description */}
       <div style={{
@@ -4495,10 +5788,10 @@ export default function GridPlayground() {
         maxWidth: 320,
         zIndex: 10,
       }}>
-        <h1 style={{ fontSize: 19, fontWeight: 600, color: 'rgba(255,255,255,0.8)' }}>
+        <h1 style={{ fontSize: 19, fontWeight: 600, color: 'var(--app-fg)' }}>
           Node Editor Canvas
         </h1>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', marginTop: 6, lineHeight: 1.57 }}>
+        <p style={{ fontSize: 14, color: 'var(--muted-fg)', marginTop: 6, lineHeight: 1.57 }}>
           Click anywhere to spawn nodes. Drag from the corner square to connect them. Slice through lines to cut connections.
         </p>
       </div>
@@ -4515,38 +5808,38 @@ export default function GridPlayground() {
           alignItems: 'center',
           zIndex: 10,
         }}>
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'right' }}>Snap to grid</span>
+        <span style={{ fontSize: 12, color: 'var(--muted-fg-2)', textAlign: 'right' }}>Snap to grid</span>
         <span style={{
           padding: '3px 7px',
           backgroundColor: 'rgba(255,255,255,0.08)',
           borderRadius: 4,
           fontSize: 11,
           fontWeight: 500,
-          color: 'rgba(255,255,255,0.45)',
+          color: 'var(--muted-fg)',
           fontFamily: 'monospace',
           minWidth: 72,
           textAlign: 'center',
         }}>⇧ Shift</span>
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'right' }}>Scale from center</span>
+        <span style={{ fontSize: 12, color: 'var(--muted-fg-2)', textAlign: 'right' }}>Scale from center</span>
         <span style={{
           padding: '3px 7px',
           backgroundColor: 'rgba(255,255,255,0.08)',
           borderRadius: 4,
           fontSize: 11,
           fontWeight: 500,
-          color: 'rgba(255,255,255,0.45)',
+          color: 'var(--muted-fg)',
           fontFamily: 'monospace',
           minWidth: 72,
           textAlign: 'center',
         }}>⌘ + Drag</span>
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'right' }}>Lock aspect ratio</span>
+        <span style={{ fontSize: 12, color: 'var(--muted-fg-2)', textAlign: 'right' }}>Lock aspect ratio</span>
         <span style={{
           padding: '3px 7px',
           backgroundColor: 'rgba(255,255,255,0.08)',
           borderRadius: 4,
           fontSize: 11,
           fontWeight: 500,
-          color: 'rgba(255,255,255,0.45)',
+          color: 'var(--muted-fg)',
           fontFamily: 'monospace',
           minWidth: 72,
           textAlign: 'center',
@@ -4562,6 +5855,7 @@ export default function GridPlayground() {
           initialY={panel.y}
           initialWidth={panel.width}
           initialHeight={panel.height}
+          gridType={gridType}
           config={config}
           isTopPanel={panel.id === topPanelId}
           isExiting={panel.isExiting}
@@ -4583,3 +5877,6 @@ export default function GridPlayground() {
     </div>
   );
 }
+
+
+
