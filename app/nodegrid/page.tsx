@@ -2902,7 +2902,7 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
     const computeLayout = (type: GridType) => {
       const out = new Map<string, { x: number; y: number }>();
 
-      const isWeb = type === 'web_one' || type === 'quantum_web';
+      const isWeb = type === 'web_one' || type === 'quantum_web' || type === 'spiral';
 
       if (type === 'isometric') {
         const margin = 200;
@@ -2957,11 +2957,14 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
 
       if (isWeb) {
         const margin = 200;
-        const angleStep = (2 * Math.PI) / polarRadialLines;
-        const radiusStep = (polarMaxRadius - polarMinRadius) / polarRings;
-        for (let ring = 0; ring <= polarRings; ring++) {
+        // Spiral uses fewer lines for simplicity
+        const spiralRadialLines = type === 'spiral' ? 16 : polarRadialLines; // Half the radial lines
+        const spiralRings = type === 'spiral' ? 12 : polarRings; // Fewer rings
+        const angleStep = (2 * Math.PI) / spiralRadialLines;
+        const radiusStep = (polarMaxRadius - polarMinRadius) / spiralRings;
+        for (let ring = 0; ring <= spiralRings; ring++) {
           const radius = polarMinRadius + ring * radiusStep;
-          for (let radial = 0; radial < polarRadialLines; radial++) {
+          for (let radial = 0; radial < spiralRadialLines; radial++) {
             const angle = radial * angleStep;
             const screen = polarToScreen(angle, radius);
             if (screen.x >= -margin && screen.x <= width + margin && screen.y >= -margin && screen.y <= height + margin) {
@@ -3022,15 +3025,12 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       }
 
       if (type === 'flux') {
-        const amp1 = 18;
-        const amp2 = 10;
-        const f1 = 0.012;
-        const f2 = 0.009;
+        // Flux: animated warped lattice (base positions stored, animation in animate loop)
+        // Store base grid coordinates - animation will be applied in the animate loop
       for (let gx = -gridSize; gx < width + gridSize * 2; gx += gridSize) {
         for (let gy = -gridSize; gy < height + gridSize * 2; gy += gridSize) {
-            const x = gx + amp1 * Math.sin(gy * f1) + amp2 * Math.sin(gx * f2);
-            const y = gy + amp1 * Math.cos(gx * f1) + amp2 * Math.cos(gy * f2);
-            out.set(`${gx},${gy}`, { x, y });
+            // Store base grid position (will be animated)
+            out.set(`${gx},${gy}`, { x: gx, y: gy });
           }
         }
         return out;
@@ -3039,6 +3039,127 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       if (type === 'constellation') {
         // (same as existing init; will be built by initDots which also builds neighbor map)
         // We'll defer to initDots for now by returning empty and letting initDots handle it.
+        return out;
+      }
+
+      if (type === 'floral') {
+        // Floral tessellation: flower-like pattern with petal curves
+        const margin = 200;
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const petalCount = 6; // 6 petals per flower
+        const flowerSpacing = gridSize * 3.5;
+        const rows = Math.ceil((height + margin * 2) / flowerSpacing) + 2;
+        const cols = Math.ceil((width + margin * 2) / flowerSpacing) + 2;
+        
+        for (let row = -rows; row <= rows; row++) {
+          for (let col = -cols; col <= cols; col++) {
+            const flowerX = centerX + col * flowerSpacing;
+            const flowerY = centerY + row * flowerSpacing;
+            
+            // Center of flower
+            out.set(`floral_${row}_${col}_center`, { x: flowerX, y: flowerY });
+            
+            // Petals around each flower
+            for (let p = 0; p < petalCount; p++) {
+              const angle = (p * 2 * Math.PI) / petalCount;
+              const petalDist = gridSize * 1.2;
+              const petalX = flowerX + Math.cos(angle) * petalDist;
+              const petalY = flowerY + Math.sin(angle) * petalDist;
+              
+              if (petalX >= -margin && petalX <= width + margin && 
+                  petalY >= -margin && petalY <= height + margin) {
+                out.set(`floral_${row}_${col}_petal_${p}`, { x: petalX, y: petalY });
+              }
+              
+              // Secondary petals (smaller, between main petals)
+              const secondaryAngle = angle + Math.PI / petalCount;
+              const secondaryDist = gridSize * 0.7;
+              const secondaryX = flowerX + Math.cos(secondaryAngle) * secondaryDist;
+              const secondaryY = flowerY + Math.sin(secondaryAngle) * secondaryDist;
+              
+              if (secondaryX >= -margin && secondaryX <= width + margin && 
+                  secondaryY >= -margin && secondaryY <= height + margin) {
+                out.set(`floral_${row}_${col}_sec_${p}`, { x: secondaryX, y: secondaryY });
+              }
+            }
+          }
+        }
+        return out;
+      }
+
+      if (type === 'waves') {
+        // Waves: simple horizontal wave pattern (base positions, animation happens in animate loop)
+        const margin = 100;
+        const waveSpacing = gridSize * 2;
+        const waveAmplitude = gridSize * 0.8;
+        const waveFrequency = 0.015;
+        
+        // Create horizontal waves across the screen
+        const numWaves = Math.ceil((height + margin * 2) / waveSpacing);
+        const pointsPerWave = Math.ceil((width + margin * 2) / (gridSize * 0.8));
+        
+        for (let wave = -2; wave <= numWaves + 2; wave++) {
+          const baseY = wave * waveSpacing; // Center y position of this wave
+          
+          for (let i = 0; i <= pointsPerWave; i++) {
+            const x = (i / pointsPerWave) * (width + margin * 2) - margin;
+            // Initial y position (will be animated in the animate loop)
+            const y = baseY + Math.sin(x * waveFrequency + wave * 0.5) * waveAmplitude;
+            
+            if (x >= -margin && x <= width + margin && 
+                y >= -margin && y <= height + margin) {
+              // Store x as x, and baseY (center) will be used for animation
+              out.set(`wave_${wave}_${i}`, { x, y });
+            }
+          }
+        }
+        
+        return out;
+      }
+
+      if (type === 'organic') {
+        // Organic: soft, rounded blob-like clusters that breathe and flow
+        const margin = 200;
+        const cellSize = gridSize * 2.5;
+        const cols = Math.ceil((width + margin * 2) / cellSize);
+        const rows = Math.ceil((height + margin * 2) / cellSize);
+        
+        // Deterministic hash for consistent organic shapes
+        const hash = (n: number) => {
+          n = (n ^ 61) ^ (n >>> 16);
+          n = n + (n << 3);
+          n = n ^ (n >>> 4);
+          n = n * 0x27d4eb2d;
+          n = n ^ (n >>> 15);
+          return (n >>> 0) / 0xffffffff;
+        };
+        
+        // Create organic blob clusters
+        for (let row = -2; row <= rows + 2; row++) {
+          for (let col = -2; col <= cols + 2; col++) {
+            const centerX = col * cellSize - margin;
+            const centerY = row * cellSize - margin;
+            const seed = row * 1000 + col;
+            
+            // Each blob has 5-8 points arranged in a soft circle
+            const pointCount = 5 + Math.floor(hash(seed) * 4); // 5-8 points
+            const baseRadius = cellSize * (0.3 + hash(seed + 1) * 0.2); // Vary blob size
+            
+            for (let p = 0; p < pointCount; p++) {
+              const angle = (p / pointCount) * Math.PI * 2 + hash(seed + p) * 0.3; // Slight random offset
+              const radius = baseRadius * (0.8 + hash(seed + p + 10) * 0.4); // Vary point distance from center
+              const x = centerX + Math.cos(angle) * radius;
+              const y = centerY + Math.sin(angle) * radius;
+              
+              if (x >= -margin && x <= width + margin && 
+                  y >= -margin && y <= height + margin) {
+                out.set(`organic_${row}_${col}_${p}`, { x, y });
+              }
+            }
+          }
+        }
+        
         return out;
       }
 
@@ -3112,7 +3233,20 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
       } else {
         const layout = computeLayout(type);
         for (const [key, p] of layout.entries()) {
-          dotsRef.current.set(key, { x: p.x, y: p.y, baseX: p.x, baseY: p.y, vx: 0, vy: 0, size: 1, targetSize: 1, brightness: 1 });
+          if (type === 'waves' && key.startsWith('wave_')) {
+            // For waves, store the wave center y position in baseY for animation
+            const parts = key.split('_');
+            if (parts.length >= 3) {
+              const waveIndex = parseInt(parts[1]);
+              const waveSpacing = gridSize * 2;
+              const baseYCenter = waveIndex * waveSpacing;
+              dotsRef.current.set(key, { x: p.x, y: p.y, baseX: p.x, baseY: baseYCenter, vx: 0, vy: 0, size: 1, targetSize: 1, brightness: 1 });
+            } else {
+              dotsRef.current.set(key, { x: p.x, y: p.y, baseX: p.x, baseY: p.y, vx: 0, vy: 0, size: 1, targetSize: 1, brightness: 1 });
+            }
+          } else {
+            dotsRef.current.set(key, { x: p.x, y: p.y, baseX: p.x, baseY: p.y, vx: 0, vy: 0, size: 1, targetSize: 1, brightness: 1 });
+          }
         }
       }
     };
@@ -3447,7 +3581,7 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
             key: `${n.q},${n.r}`,
             dot: dotsRef.current.get(`${n.q},${n.r}`),
           }));
-        } else if (gridType === 'web_one' || gridType === 'quantum_web') {
+        } else if (gridType === 'web_one' || gridType === 'quantum_web' || gridType === 'spiral') {
           // Polar grid: parse the key format polar_ring_radial
           if (key.startsWith('polar_')) {
             const parts = key.split('_');
@@ -3522,6 +3656,77 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
           const map = (dotsRef.current as unknown as { __constellation?: Map<string, string[]> }).__constellation;
           const next = map?.get(key) ?? [];
           neighbors = next.map(k => ({ key: k, dot: dotsRef.current.get(k) }));
+        } else if (gridType === 'floral') {
+          // Floral: connect center to petals, petals to nearby petals
+          if (key.startsWith('floral_')) {
+            const parts = key.split('_');
+            if (parts.length >= 4) {
+              const row = parseInt(parts[1]);
+              const col = parseInt(parts[2]);
+              const part = parts[3];
+              
+              if (part === 'center') {
+                // Center connects to all its petals
+                for (let p = 0; p < 6; p++) {
+                  neighbors.push({
+                    key: `floral_${row}_${col}_petal_${p}`,
+                    dot: dotsRef.current.get(`floral_${row}_${col}_petal_${p}`)
+                  });
+                }
+              } else if (part === 'petal') {
+                const petalIdx = parseInt(parts[4]);
+                // Petal connects to center and adjacent petals
+                neighbors.push({
+                  key: `floral_${row}_${col}_center`,
+                  dot: dotsRef.current.get(`floral_${row}_${col}_center`)
+                });
+                const nextPetal = (petalIdx + 1) % 6;
+                const prevPetal = (petalIdx - 1 + 6) % 6;
+                neighbors.push(
+                  { key: `floral_${row}_${col}_petal_${nextPetal}`, dot: dotsRef.current.get(`floral_${row}_${col}_petal_${nextPetal}`) },
+                  { key: `floral_${row}_${col}_petal_${prevPetal}`, dot: dotsRef.current.get(`floral_${row}_${col}_petal_${prevPetal}`) }
+                );
+                // Connect to secondary petal
+                neighbors.push({
+                  key: `floral_${row}_${col}_sec_${petalIdx}`,
+                  dot: dotsRef.current.get(`floral_${row}_${col}_sec_${petalIdx}`)
+                });
+              } else if (part === 'sec') {
+                const secIdx = parseInt(parts[4]);
+                // Secondary petal connects to nearby main petals
+                neighbors.push({
+                  key: `floral_${row}_${col}_petal_${secIdx}`,
+                  dot: dotsRef.current.get(`floral_${row}_${col}_petal_${secIdx}`)
+                });
+                const nextPetal = (secIdx + 1) % 6;
+                neighbors.push({
+                  key: `floral_${row}_${col}_petal_${nextPetal}`,
+                  dot: dotsRef.current.get(`floral_${row}_${col}_petal_${nextPetal}`)
+                });
+              }
+            }
+          }
+        } else if (gridType === 'waves') {
+          // Waves: connect horizontally along the wave
+          if (key.startsWith('wave_')) {
+            const parts = key.split('_');
+            if (parts.length >= 3) {
+              const wave = parseInt(parts[1]);
+              const point = parseInt(parts[2]);
+              
+              // Connect to next and previous point on same wave
+              if (point > 0) {
+                neighbors.push({
+                  key: `wave_${wave}_${point - 1}`,
+                  dot: dotsRef.current.get(`wave_${wave}_${point - 1}`)
+                });
+              }
+              neighbors.push({
+                key: `wave_${wave}_${point + 1}`,
+                dot: dotsRef.current.get(`wave_${wave}_${point + 1}`)
+              });
+            }
+          }
         } else {
           // Rectangular grid: right and bottom
         const gx = parseInt(gxStr);
@@ -3580,8 +3785,8 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
             ctx.beginPath();
             ctx.moveTo(dot.x, dot.y);
 
-          if ((gridType === 'quantum_web') && key.startsWith('polar_') && neighborKey?.startsWith('polar_')) {
-            // Quantum Web: Bezier webbing (deterministic subtle curve per edge)
+          if ((gridType === 'quantum_web' || gridType === 'spiral') && key.startsWith('polar_') && neighborKey?.startsWith('polar_')) {
+            // Quantum Web and Spiral: Bezier webbing (deterministic subtle curve per edge)
             const partsA = key.split('_');
             const partsB = neighborKey.split('_');
             const ringA = parseInt(partsA[1] || '0', 10);
@@ -3626,7 +3831,7 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
         let baseX: number, baseY: number;
         
         if (gridType === 'isometric') {
-          const [gxStr, gyStr] = key.split(',');
+        const [gxStr, gyStr] = key.split(',');
           const isoX = parseInt(gxStr);
           const isoY = parseInt(gyStr);
           const screen = isometricToScreen(isoX, isoY);
@@ -3644,9 +3849,89 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
           baseX = screen.x + offsetX;
           baseY = screen.y + offsetY;
         } else if (gridType === 'web_one' || gridType === 'quantum_web') {
-          // Web family: anchor to stable rest position
+          // Web One and Quantum Web: anchor to stable rest position
           baseX = dot.baseX;
           baseY = dot.baseY;
+        } else if (gridType === 'spiral') {
+          // Spiral: animate every other ring with rotation (simplified)
+          if (key.startsWith('polar_')) {
+            const parts = key.split('_');
+            if (parts.length >= 3) {
+              const ring = parseInt(parts[1]);
+              const radial = parseInt(parts[2]);
+              
+              // Calculate base angle and radius (using simplified spiral parameters)
+              const spiralRadialLines = 16;
+              const spiralRings = 12;
+              const angleStep = (2 * Math.PI) / spiralRadialLines;
+              const radiusStep = (polarMaxRadius - polarMinRadius) / spiralRings;
+              const baseRadius = polarMinRadius + ring * radiusStep;
+              const baseAngle = radial * angleStep;
+              
+              // Rotate every other ring (even rings rotate one way, odd rings the other)
+              const rotationSpeed = 0.0002; // Slow rotation speed
+              const rotationDirection = ring % 2 === 0 ? 1 : -1; // Alternate direction
+              const rotationAngle = baseAngle + (now * rotationSpeed * rotationDirection);
+              
+              // Convert to screen coordinates
+              const screen = polarToScreen(rotationAngle, baseRadius);
+              baseX = screen.x;
+              baseY = screen.y;
+            } else {
+              baseX = dot.baseX;
+              baseY = dot.baseY;
+            }
+          } else {
+            baseX = dot.baseX;
+            baseY = dot.baseY;
+          }
+        } else if (gridType === 'organic') {
+          // Organic: animate with soft breathing/pulsing effect
+          if (key.startsWith('organic_')) {
+            const parts = key.split('_');
+            if (parts.length >= 4) {
+              const row = parseInt(parts[1]);
+              const col = parseInt(parts[2]);
+              const point = parseInt(parts[3]);
+              const seed = row * 1000 + col;
+              
+              // Get base position
+              const baseXPos = dot.baseX;
+              const baseYPos = dot.baseY;
+              
+              // Calculate blob center
+              const cellSize = gridSize * 2.5;
+              const centerX = col * cellSize - 200;
+              const centerY = row * cellSize - 200;
+              
+              // Soft breathing animation - gentle pulsing
+              const breathTime = now * 0.0005; // Slow breathing
+              const breathPhase = seed * 0.1; // Each blob breathes at slightly different phase
+              const breathAmount = Math.sin(breathTime + breathPhase) * 0.15 + 1.0; // Pulse between 0.85x and 1.15x
+              
+              // Gentle floating motion
+              const floatX = Math.sin(breathTime * 0.7 + seed * 0.05) * 3;
+              const floatY = Math.cos(breathTime * 0.6 + seed * 0.07) * 3;
+              
+              // Calculate distance from center for radial breathing
+              const dx = baseXPos - centerX;
+              const dy = baseYPos - centerY;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              
+              // Apply breathing (points move in/out from center)
+              const newX = centerX + (dx * breathAmount) + floatX;
+              const newY = centerY + (dy * breathAmount) + floatY;
+              
+              baseX = newX;
+              baseY = newY;
+            } else {
+              baseX = dot.baseX;
+              baseY = dot.baseY;
+            }
+          } else {
+            baseX = dot.baseX;
+            baseY = dot.baseY;
+          }
         } else if (gridType === 'triangular') {
           // For triangular lattice, use stable rest position
           baseX = dot.baseX;
@@ -3656,13 +3941,69 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
           baseX = dot.baseX;
           baseY = dot.baseY;
         } else if (gridType === 'flux') {
-          // For flux, use stable rest position (warped lattice)
-          baseX = dot.baseX;
-          baseY = dot.baseY;
+          // For flux, animate the warped lattice with time-based waves
+          const fluxTime = now * 0.0004; // Slow animation speed
+          const amp1 = 18;
+          const amp2 = 10;
+          const f1 = 0.012;
+          const f2 = 0.009;
+          
+          // Parse grid coordinates from key (gx,gy)
+        const [gxStr, gyStr] = key.split(',');
+          if (gxStr && gyStr) {
+        const gx = parseInt(gxStr);
+        const gy = parseInt(gyStr);
+
+            // Animated flux distortion with time-based phase
+            const x = gx + amp1 * Math.sin(gy * f1 + fluxTime) + amp2 * Math.sin(gx * f2 + fluxTime * 0.7);
+            const y = gy + amp1 * Math.cos(gx * f1 + fluxTime * 0.8) + amp2 * Math.cos(gy * f2 + fluxTime * 1.2);
+            
+            baseX = x;
+            baseY = y;
+          } else {
+            baseX = dot.baseX;
+            baseY = dot.baseY;
+          }
         } else if (gridType === 'constellation') {
           // For constellation, use stable rest position (star field)
           baseX = dot.baseX;
           baseY = dot.baseY;
+        } else if (gridType === 'floral') {
+          // For floral, use stable rest position
+          baseX = dot.baseX;
+          baseY = dot.baseY;
+        } else if (gridType === 'waves') {
+          // For waves, animate the y position based on time for water-like movement
+          const waveTime = (now * 0.0003) % (Math.PI * 2); // Slow animation (0.0003 = subtle speed)
+          const waveSpacing = gridSize * 2;
+          const waveAmplitude = gridSize * 0.8;
+          const waveFrequency = 0.015;
+          
+          // Parse wave index from key (wave_${wave}_${i})
+          const parts = key.split('_');
+          if (parts.length >= 3) {
+            const waveIndex = parseInt(parts[1]);
+            const pointIndex = parseInt(parts[2]);
+            
+            // Get the stored base x position from the dot
+            // For waves, baseX stores the x coordinate, baseY stores the center y
+            const baseXPos = dot.baseX;
+            // Calculate base y position (center of wave) from the wave index
+            const baseYPos = waveIndex * waveSpacing;
+            
+            // Animate with phase offset per wave for water-like effect
+            const phaseOffset = waveIndex * 0.5;
+            const timeOffset = waveTime + phaseOffset;
+            // Add horizontal wave propagation (sine wave along x-axis)
+            const horizontalPhase = baseXPos * waveFrequency;
+            const animatedY = baseYPos + Math.sin(horizontalPhase + timeOffset) * waveAmplitude;
+            
+            baseX = baseXPos;
+            baseY = animatedY;
+          } else {
+            baseX = dot.baseX;
+            baseY = dot.baseY;
+          }
         } else {
         const [gxStr, gyStr] = key.split(',');
         const gx = parseInt(gxStr);
@@ -3774,13 +4115,27 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
           const relY = y - offsetY;
           const { q, r } = screenToHex(relX, relY);
           return { gx: q, gy: r };
-        } else if (gridType === 'web_one' || gridType === 'quantum_web') {
+        } else if (gridType === 'web_one' || gridType === 'quantum_web' || gridType === 'spiral') {
           // For polar, find nearest dot
           let nearestKey = '';
           let minDist = Infinity;
           
           dotsRef.current.forEach((d, k) => {
             if (k.startsWith('polar_')) {
+              const dist = Math.sqrt((d.x - x) ** 2 + (d.y - y) ** 2);
+              if (dist < minDist) {
+                minDist = dist;
+                nearestKey = k;
+              }
+            }
+          });
+          return { gx: 0, gy: 0, key: nearestKey };
+        } else if (gridType === 'organic') {
+          // For organic, find nearest dot
+          let nearestKey = '';
+          let minDist = Infinity;
+          dotsRef.current.forEach((d, k) => {
+            if (k.startsWith('organic_')) {
               const dist = Math.sqrt((d.x - x) ** 2 + (d.y - y) ** 2);
               if (dist < minDist) {
                 minDist = dist;
@@ -3853,6 +4208,34 @@ function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mouseP
           }
 
           return { gx: Math.round(x / gridSize) * gridSize, gy: Math.round(y / gridSize) * gridSize };
+        } else if (gridType === 'floral') {
+          // For floral, find nearest dot
+          let nearestKey = '';
+          let minDist = Infinity;
+          dotsRef.current.forEach((d, k) => {
+            if (k.startsWith('floral_')) {
+              const dist = Math.sqrt((d.x - x) ** 2 + (d.y - y) ** 2);
+              if (dist < minDist) {
+                minDist = dist;
+                nearestKey = k;
+              }
+            }
+          });
+          return { gx: 0, gy: 0, key: nearestKey };
+        } else if (gridType === 'waves') {
+          // For waves, find nearest dot
+          let nearestKey = '';
+          let minDist = Infinity;
+          dotsRef.current.forEach((d, k) => {
+            if (k.startsWith('wave_')) {
+              const dist = Math.sqrt((d.x - x) ** 2 + (d.y - y) ** 2);
+              if (dist < minDist) {
+                minDist = dist;
+                nearestKey = k;
+              }
+            }
+          });
+          return { gx: 0, gy: 0, key: nearestKey };
         } else {
           return {
         gx: Math.round(x / gridSize) * gridSize,
@@ -4651,7 +5034,11 @@ type GridType =
   | 'triangular'
   | 'mesh'
   | 'flux'
-  | 'constellation';
+  | 'constellation'
+  | 'floral'
+  | 'waves'
+  | 'spiral'
+  | 'organic';
 
 export default function GridPlayground() {
   const router = useRouter();
@@ -4692,6 +5079,10 @@ export default function GridPlayground() {
     'mesh',
     'flux',
     'constellation',
+    'floral',
+    'waves',
+    'spiral',
+    'organic',
   ];
 
   // Keyboard: ArrowRight / ArrowDown advances the grid story
@@ -5706,6 +6097,10 @@ export function NodeGridStory() {
             'mesh',
             'flux',
             'constellation',
+            'floral',
+            'waves',
+            'spiral',
+            'organic',
           ] as GridType[]).map((type) => {
             const label =
               type === 'web_one' ? 'Web One' :
@@ -5714,6 +6109,10 @@ export function NodeGridStory() {
               type === 'mesh' ? 'Mesh' :
               type === 'flux' ? 'Flux' :
               type === 'constellation' ? 'Constellation' :
+              type === 'floral' ? 'Floral' :
+              type === 'waves' ? 'Waves' :
+              type === 'spiral' ? 'Spiral' :
+              type === 'organic' ? 'Organic' :
               type.charAt(0).toUpperCase() + type.slice(1);
             return (
             <button
