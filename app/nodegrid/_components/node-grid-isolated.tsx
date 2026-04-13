@@ -2,6 +2,7 @@
 
 import React, { useEffect } from 'react';
 import type { GridType } from '../grid-types';
+import { DEFAULT_GRID_CELL_SIZE, DEFAULT_STROKE_SCALE } from '../grid-types';
 import { DotGridCanvas, NoiseOverlay } from './dot-grid-canvas';
 import '../grid.css';
 
@@ -11,6 +12,8 @@ export type NodeGridIsolatedProps = {
   accentHex?: string;
   /** Film-grain WebGL overlay (same as full playground) */
   withNoiseOverlay?: boolean;
+  gridCellSize?: number;
+  strokeScale?: number;
 };
 
 const handleCutAnimationCompleteNoop = () => {};
@@ -24,6 +27,8 @@ export const NodeGridIsolated = ({
   theme = 'dark',
   accentHex = '#2563eb',
   withNoiseOverlay = true,
+  gridCellSize = DEFAULT_GRID_CELL_SIZE,
+  strokeScale = DEFAULT_STROKE_SCALE,
 }: NodeGridIsolatedProps) => {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -60,7 +65,7 @@ export const NodeGridIsolated = ({
     >
       {withNoiseOverlay ? <NoiseOverlay /> : null}
       <DotGridCanvas
-        key={gridType}
+        key={`${gridType}-${gridCellSize}-${strokeScale}`}
         panelX={-9999}
         panelY={-9999}
         panelWidth={0}
@@ -76,6 +81,8 @@ export const NodeGridIsolated = ({
         gridType={gridType}
         theme={theme}
         accentHex={accentHex}
+        gridCellSize={gridCellSize}
+        strokeScale={strokeScale}
       />
     </div>
   );

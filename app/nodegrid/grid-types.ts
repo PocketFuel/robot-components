@@ -1,3 +1,11 @@
+/** Base spacing for rectangular snap logic and canvas layout (px) */
+export const DEFAULT_GRID_CELL_SIZE = 40;
+export const DEFAULT_STROKE_SCALE = 1;
+export const GRID_CELL_SIZE_MIN = 16;
+export const GRID_CELL_SIZE_MAX = 120;
+export const STROKE_SCALE_MIN = 0.25;
+export const STROKE_SCALE_MAX = 4;
+
 /** Internal grid algorithm keys used by DotGridCanvas */
 export type GridType =
   | 'rectangular'

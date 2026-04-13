@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import type { GridType } from '../grid-types';
+import { DEFAULT_GRID_CELL_SIZE, DEFAULT_STROKE_SCALE } from '../grid-types';
 import { panelSounds } from './panel-sounds';
 
 // WebGL Noise Shader Overlay
@@ -207,7 +208,49 @@ export interface CutConnection {
   cutTime: number;
 }
 
-export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses, mousePos, panels, connections, connectionDrag, sliceTrail, cutConnections, onCutAnimationComplete, gridType, theme, accentHex, onCanvasReady }: { panelX: number; panelY: number; panelWidth: number; panelHeight: number; pulses: PulseEvent[]; mousePos: { x: number; y: number } | null; panels: FloatingPanelData[]; connections: PanelConnection[]; connectionDrag: ConnectionDrag | null; sliceTrail: SlicePoint[]; cutConnections: CutConnection[]; onCutAnimationComplete: (id: string) => void; gridType: GridType; theme: 'dark' | 'light'; accentHex: string; onCanvasReady?: (canvas: HTMLCanvasElement | null) => void }) {
+export type DotGridCanvasProps = {
+  panelX: number;
+  panelY: number;
+  panelWidth: number;
+  panelHeight: number;
+  pulses: PulseEvent[];
+  mousePos: { x: number; y: number } | null;
+  panels: FloatingPanelData[];
+  connections: PanelConnection[];
+  connectionDrag: ConnectionDrag | null;
+  sliceTrail: SlicePoint[];
+  cutConnections: CutConnection[];
+  onCutAnimationComplete: (id: string) => void;
+  gridType: GridType;
+  theme: 'dark' | 'light';
+  accentHex: string;
+  onCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
+  /** Pixel spacing for layouts that use a square grid (default 40) */
+  gridCellSize?: number;
+  /** Multiplier for grid link / node stroke widths (default 1) */
+  strokeScale?: number;
+};
+
+export function DotGridCanvas({
+  panelX,
+  panelY,
+  panelWidth,
+  panelHeight,
+  pulses,
+  mousePos,
+  panels,
+  connections,
+  connectionDrag,
+  sliceTrail,
+  cutConnections,
+  onCutAnimationComplete,
+  gridType,
+  theme,
+  accentHex,
+  onCanvasReady,
+  gridCellSize = DEFAULT_GRID_CELL_SIZE,
+  strokeScale = DEFAULT_STROKE_SCALE,
+}: DotGridCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
   const dotsRef = useRef<Map<string, { x: number; y: number; baseX: number; baseY: number; vx: number; vy: number; size: number; targetSize: number; brightness: number }>>(new Map());
@@ -248,7 +291,8 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const gridSize = 40;
+    const gridSize = gridCellSize;
+    const lw = (base: number) => Math.max(0.08, base * strokeScale);
     const maxDist = 400;
     const pushStrength = 8; // Reduced from 25 to make repulsion less aggressive
     const springStiffness = 0.08;
@@ -416,7 +460,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
       const { r: ar, g: ag, b: ab } = accentRgbRef.current;
       ctx.fillStyle = `rgba(${ar}, ${ag}, ${ab}, ${alpha})`;
       ctx.strokeStyle = `rgba(${Math.min(255, ar + 63)}, ${Math.min(255, ag + 61)}, ${Math.min(255, ab + 20)}, ${alpha * 0.8})`;
-      ctx.lineWidth = 0.5;
+      ctx.lineWidth = lw(0.5);
 
       if (p.shape === 'circle') {
         ctx.beginPath();
@@ -445,12 +489,12 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
         const { r: ar, g: ag, b: ab } = accentRgbRef.current;
         ctx.fillStyle = `rgba(${ar}, ${ag}, ${ab}, ${alpha * 0.95})`;
         ctx.strokeStyle = `rgba(${Math.min(255, ar + 63)}, ${Math.min(255, ag + 61)}, ${Math.min(255, ab + 20)}, ${alpha * 0.8})`;
-        ctx.lineWidth = 0.5;
+        ctx.lineWidth = lw(0.5);
       } else {
         // Cyan/white (original)
         ctx.fillStyle = `rgba(150, 220, 255, ${alpha * 0.9})`;
         ctx.strokeStyle = `rgba(220, 240, 255, ${alpha})`;
-        ctx.lineWidth = 0.8;
+        ctx.lineWidth = lw(0.8);
       }
 
       if (p.shape === 'circle') {
@@ -1434,7 +1478,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
             ctx.lineTo(nextPosH.x, nextPosH.y);
               const { r: ar, g: ag, b: ab } = accentRgbRef.current;
               ctx.strokeStyle = `rgba(${ar}, ${ag}, ${ab}, ${avgPulseH * 0.9})`;
-            ctx.lineWidth = 0.3 + avgPulseH * 0.5;
+            ctx.lineWidth = lw(0.3 + avgPulseH * 0.5);
             ctx.stroke();
           }
 
@@ -1451,7 +1495,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
             ctx.lineTo(nextPosV.x, nextPosV.y);
               const { r: ar2, g: ag2, b: ab2 } = accentRgbRef.current;
               ctx.strokeStyle = `rgba(${ar2}, ${ag2}, ${ab2}, ${avgPulseV * 0.9})`;
-            ctx.lineWidth = 0.3 + avgPulseV * 0.5;
+            ctx.lineWidth = lw(0.3 + avgPulseV * 0.5);
             ctx.stroke();
             }
           }
@@ -1459,7 +1503,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
       }
 
       // Main wireframe lines
-      ctx.lineWidth = 0.5;
+      ctx.lineWidth = lw(0.5);
       dotsRef.current.forEach((dot, key) => {
         const [gxStr, gyStr] = key.split(',');
         
@@ -1784,7 +1828,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
             ctx.lineTo(neighborDot.x, neighborDot.y);
           }
 
-            ctx.lineWidth = 0.5 + avgEffect * 2;
+            ctx.lineWidth = lw(0.5 + avgEffect * 2);
             ctx.strokeStyle = lineColor;
             ctx.stroke();
         });
@@ -2572,7 +2616,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
 
         ctx.save();
         ctx.strokeStyle = color;
-        ctx.lineWidth = lineWidth;
+        ctx.lineWidth = lw(lineWidth);
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.globalAlpha = alpha;
@@ -2704,7 +2748,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
               if (brightness > 0.02) {
                 ctx.save();
                 ctx.strokeStyle = `rgba(0, 200, 255, ${brightness * 0.9})`;
-                ctx.lineWidth = lineWidth + brightness * 1.5;
+                ctx.lineWidth = lw(lineWidth + brightness * 1.5);
                 ctx.lineCap = 'round';
                 ctx.beginPath();
                 ctx.moveTo(sampledPoints[i].x, sampledPoints[i].y);
@@ -2797,7 +2841,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
               const { r: ar, g: ag, b: ab } = accentRgbRef.current;
               ctx.strokeStyle = `rgb(${ar}, ${ag}, ${ab})`;
             }
-            ctx.lineWidth = 2;
+            ctx.lineWidth = lw(2);
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.globalAlpha = fadeAlpha;
@@ -2892,7 +2936,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
         ctx.save();
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = lw(2);
 
         ctx.beginPath();
         let started = false;
@@ -2950,7 +2994,7 @@ export function DotGridCanvas({ panelX, panelY, panelWidth, panelHeight, pulses,
       window.removeEventListener('resize', handleResize);
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
-  }, []);
+  }, [gridCellSize, strokeScale]);
 
   // Update refs when props change
   useEffect(() => {
