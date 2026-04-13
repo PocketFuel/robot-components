@@ -17,6 +17,7 @@ import {
   gridTypeLabel,
   type GridType,
 } from '../grid-types';
+import { MAG_MODE_LLM_RECIPE } from '../mag-mode-recipe';
 import { DotGridCanvas, NoiseOverlay } from './dot-grid-canvas';
 import { MagnifierDomLens } from './magnifier-dom-lens';
 import { MagnifierGridOcclusion } from './magnifier-grid-occlusion';
@@ -327,6 +328,15 @@ export const MagnifierPlayground = () => {
     a.download = fileName;
     a.click();
   }, [gridType]);
+
+  const copyMagModeRecipe = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(MAG_MODE_LLM_RECIPE);
+      soundEffects.playQuickStartClick();
+    } catch {
+      // ignore
+    }
+  }, []);
 
   return (
     <div
@@ -688,6 +698,27 @@ export const MagnifierPlayground = () => {
             }}
           >
             PNG
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void copyMagModeRecipe();
+            }}
+            onMouseEnter={() => soundEffects.playHoverSound('copy-code')}
+            style={{
+              padding: '6px 10px',
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--app-fg)',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              border: `1px solid var(--btn-outline)`,
+              borderRadius: 8,
+              cursor: 'pointer',
+            }}
+            title="Copy MAG MODE recipe for LLMs (files, z-order, pointer ref pattern, lens transform)"
+          >
+            Copy recipe
           </button>
           <Link
             href="/nodegrid"

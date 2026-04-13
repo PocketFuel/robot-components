@@ -20,6 +20,7 @@ import {
   gridTypeToSlug,
   type GridType,
 } from '../grid-types';
+import { MAG_MODE_LLM_RECIPE } from '../mag-mode-recipe';
 import { panelSounds } from './panel-sounds';
 import { DotGridCanvas, NoiseOverlay, type ConnectionDrag, type CutConnection, type FloatingPanelData, type PanelConnection, type PulseEvent, type SlicePoint } from './dot-grid-canvas';
 
@@ -2295,6 +2296,13 @@ ${fence}tsx
   </div>
 </div>
 ${fence}
+
+/*
+ * =============================================================================
+ * MAG MODE — /nodegrid/magnifier (circular loupe; separate from this playground)
+ * =============================================================================
+ */
+${MAG_MODE_LLM_RECIPE}
 `;
 
     await navigator.clipboard.writeText(code);
@@ -3247,7 +3255,7 @@ ${fence}
               borderRadius: 8,
               cursor: 'pointer',
             }}
-            title="Copy integration recipe for LLMs (GitHub paths, props, optional Tailwind chrome)"
+            title="Copy integration recipe for LLMs (GitHub paths, props, optional Tailwind chrome; includes MAG MODE appendix)"
           >
             Copy recipe
           </button>
