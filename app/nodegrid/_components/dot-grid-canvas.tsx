@@ -225,6 +225,11 @@ export type DotGridCanvasProps = {
   theme: 'dark' | 'light';
   accentHex: string;
   onCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
+  /**
+   * When set, mouse position for grid interaction is read from this ref each animation frame
+   * instead of the `mousePos` prop (avoids high-frequency React state updates).
+   */
+  externalMousePosRef?: React.MutableRefObject<{ x: number; y: number } | null> | null;
   /** Pixel spacing for layouts that use a square grid (default 40) */
   gridCellSize?: number;
   /** Multiplier for grid link / node stroke widths (default 1) */
@@ -248,6 +253,7 @@ export function DotGridCanvas({
   theme,
   accentHex,
   onCanvasReady,
+  externalMousePosRef = null,
   gridCellSize = DEFAULT_GRID_CELL_SIZE,
   strokeScale = DEFAULT_STROKE_SCALE,
 }: DotGridCanvasProps) {
@@ -276,13 +282,17 @@ export function DotGridCanvas({
   const bouncyParticlesRef = useRef<Particle[]>([]);
   const lastPulseTimeRef = useRef(0);
   const lastParticleSoundTimeRef = useRef(0);
+  const onCanvasReadyRef = useRef(onCanvasReady);
+  onCanvasReadyRef.current = onCanvasReady;
+  const externalMousePosRefRef = useRef(externalMousePosRef);
+  externalMousePosRefRef.current = externalMousePosRef;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    onCanvasReady?.(canvas);
-    return () => onCanvasReady?.(null);
-  }, [onCanvasReady]);
+    onCanvasReadyRef.current?.(canvas);
+    return () => onCanvasReadyRef.current?.(null);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1291,6 +1301,11 @@ export function DotGridCanvas({
       const now = performance.now();
       const deltaTime = now - lastTime;
       lastTime = now;
+
+      const extMouse = externalMousePosRefRef.current;
+      if (extMouse) {
+        mousePosRef.current = extMouse.current;
+      }
 
       // If the requested gridType changed, start a smooth transition
       if (gridTypeRef.current !== currentType) {
@@ -3006,8 +3021,9 @@ export function DotGridCanvas({
   }, [pulses]);
 
   useEffect(() => {
+    if (externalMousePosRef) return;
     mousePosRef.current = mousePos;
-  }, [mousePos]);
+  }, [mousePos, externalMousePosRef]);
 
   useEffect(() => {
     panelsRef.current = panels;

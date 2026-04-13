@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 
 export type MagnifierGridOcclusionProps = {
-  mousePos: { x: number; y: number } | null;
+  mousePosRef: MutableRefObject<{ x: number; y: number } | null>;
   radius: number;
   theme: 'dark' | 'light';
 };
@@ -12,11 +12,10 @@ export type MagnifierGridOcclusionProps = {
  * Paints the page background color over the dot grid in a circle under the lens,
  * so only the magnified resample (drawn above) reads as “through the glass”.
  */
-export const MagnifierGridOcclusion = ({ mousePos, radius, theme }: MagnifierGridOcclusionProps) => {
+export const MagnifierGridOcclusion = ({ mousePosRef, radius, theme }: MagnifierGridOcclusionProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const mouseRef = useRef(mousePos);
+  const mouseRef = mousePosRef;
   const themeRef = useRef(theme);
-  mouseRef.current = mousePos;
   themeRef.current = theme;
 
   useEffect(() => {
@@ -79,7 +78,7 @@ export const MagnifierGridOcclusion = ({ mousePos, radius, theme }: MagnifierGri
         position: 'fixed',
         inset: 0,
         pointerEvents: 'none',
-        zIndex: 1,
+        zIndex: 3,
       }}
     />
   );

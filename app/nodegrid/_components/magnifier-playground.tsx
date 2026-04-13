@@ -3,6 +3,7 @@
 import '../grid.css';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { Instrument_Serif } from 'next/font/google';
 import { useRouter } from 'next/navigation';
 import { soundEffects } from '../../../src/utils/SoundEffects';
 import {
@@ -20,13 +21,21 @@ import { DotGridCanvas, NoiseOverlay } from './dot-grid-canvas';
 import { MagnifierGridOcclusion } from './magnifier-grid-occlusion';
 import { MagnifierLens } from './magnifier-lens';
 
+const instrumentSerif = Instrument_Serif({
+  weight: '400',
+  subsets: ['latin'],
+  display: 'swap',
+});
+
 const clampNumber = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
 const handleCutNoop = () => {};
 
+type MagNode = { id: string; x: number; y: number };
+
 export const MagnifierPlayground = () => {
   const router = useRouter();
-  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const mousePosRef = useRef<{ x: number; y: number } | null>(null);
   const [gridCanvas, setGridCanvas] = useState<HTMLCanvasElement | null>(null);
   const [canvasResetKey, setCanvasResetKey] = useState(0);
   const [gridType, setGridType] = useState<GridType>('rectangular');
@@ -34,8 +43,11 @@ export const MagnifierPlayground = () => {
   const [accentHex, setAccentHex] = useState('#2563eb');
   const [gridCellSize, setGridCellSize] = useState(DEFAULT_GRID_CELL_SIZE);
   const [strokeScale, setStrokeScale] = useState(DEFAULT_STROKE_SCALE);
-  const [lensRadius, setLensRadius] = useState(110);
-  const [lensZoom, setLensZoom] = useState(2.25);
+  const [lensRadius, setLensRadius] = useState(64);
+  const [lensZoom, setLensZoom] = useState(1.25);
+  const [heroTitle, setHeroTitle] = useState('Background Canvas');
+  const [heroVisible, setHeroVisible] = useState(true);
+  const [magNodes, setMagNodes] = useState<MagNode[]>([]);
   const exportCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -63,11 +75,17 @@ export const MagnifierPlayground = () => {
   }, [accentHex]);
 
   useEffect(() => {
+    mousePosRef.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     const onMove = (e: MouseEvent) => {
-      setMousePos({ x: e.clientX, y: e.clientY });
+      mousePosRef.current = { x: e.clientX, y: e.clientY };
     };
     window.addEventListener('mousemove', onMove);
     return () => window.removeEventListener('mousemove', onMove);
+  }, []);
+
+  const handleCanvasReady = useCallback((canvas: HTMLCanvasElement | null) => {
+    exportCanvasRef.current = canvas;
+    setGridCanvas((prev) => (prev === canvas ? prev : canvas));
   }, []);
 
   const exportImage = useCallback(async (format: 'png' | 'jpeg') => {
@@ -117,7 +135,8 @@ export const MagnifierPlayground = () => {
         panelWidth={0}
         panelHeight={0}
         pulses={[]}
-        mousePos={mousePos}
+        mousePos={null}
+        externalMousePosRef={mousePosRef}
         panels={[]}
         connections={[]}
         connectionDrag={null}
@@ -129,17 +148,207 @@ export const MagnifierPlayground = () => {
         accentHex={accentHex}
         gridCellSize={gridCellSize}
         strokeScale={strokeScale}
-        onCanvasReady={(c) => {
-          exportCanvasRef.current = c;
-          setGridCanvas(c);
+        onCanvasReady={handleCanvasReady}
+      />
+
+      <div
+        role="presentation"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 1,
+          pointerEvents: 'auto',
+          cursor: 'none',
+        }}
+        onClick={(e) => {
+          if (e.target !== e.currentTarget) return;
+          soundEffects.playQuickStartClick();
+          setMagNodes((prev) => [
+            ...prev,
+            { id: `mag-node-${Date.now()}-${prev.length}`, x: e.clientX, y: e.clientY },
+          ]);
         }}
       />
 
-      <MagnifierGridOcclusion mousePos={mousePos} radius={lensRadius} theme={theme} />
+      {heroVisible ? (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 2,
+            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'default',
+          }}
+        >
+          <div
+            style={{
+              pointerEvents: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 20,
+              maxWidth: 'min(92vw, 520px)',
+              padding: '28px 32px',
+              borderRadius: 16,
+              backgroundColor: theme === 'dark' ? 'rgba(14, 14, 18, 0.58)' : 'rgba(255, 255, 255, 0.78)',
+              border: '1px solid var(--btn-outline)',
+              boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            <input
+              id="mag-hero-title"
+              type="text"
+              value={heroTitle}
+              onChange={(e) => setHeroTitle(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              className={instrumentSerif.className}
+              style={{
+                width: '100%',
+                textAlign: 'center',
+                fontSize: 'clamp(28px, 4.5vw, 44px)',
+                lineHeight: 1.15,
+                letterSpacing: '-0.02em',
+                color: 'var(--app-fg)',
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+              }}
+              aria-label="Hero title text"
+            />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn-skin"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  soundEffects.playQuickStartClick();
+                }}
+                onMouseEnter={() => soundEffects.playHoverSound('logo')}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 10,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: '#fff',
+                  backgroundColor: 'rgb(var(--accent-rgb))',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                Primary
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  soundEffects.playQuickStartClick();
+                }}
+                onMouseEnter={() => soundEffects.playHoverSound('theme')}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 10,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: 'var(--app-fg)',
+                  backgroundColor: 'rgba(255,255,255,0.06)',
+                  border: `1px solid var(--btn-outline)`,
+                  cursor: 'pointer',
+                }}
+              >
+                Secondary
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  soundEffects.playQuickStartClick();
+                  setHeroVisible(false);
+                }}
+                onMouseEnter={() => soundEffects.playHoverSound('grid-type')}
+                style={{
+                  padding: '10px 16px',
+                  borderRadius: 10,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: 'var(--muted-fg)',
+                  backgroundColor: 'transparent',
+                  border: `1px dashed var(--btn-outline)`,
+                  cursor: 'pointer',
+                }}
+              >
+                Hide
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
-      <NoiseOverlay overlayZIndex={2} />
+      {!heroVisible ? (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 120,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+            cursor: 'default',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              soundEffects.playQuickStartClick();
+              setHeroVisible(true);
+            }}
+            onMouseEnter={() => soundEffects.playHoverSound('grid-type')}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 10,
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--app-fg)',
+              backgroundColor: 'rgba(255,255,255,0.08)',
+              border: `1px solid var(--btn-outline)`,
+              cursor: 'pointer',
+            }}
+          >
+            Show hero
+          </button>
+        </div>
+      ) : null}
 
-      <MagnifierLens sourceCanvas={gridCanvas} mousePos={mousePos} radius={lensRadius} zoom={lensZoom} />
+      <MagnifierGridOcclusion mousePosRef={mousePosRef} radius={lensRadius} theme={theme} />
+
+      <NoiseOverlay overlayZIndex={4} />
+
+      <MagnifierLens sourceCanvas={gridCanvas} mousePosRef={mousePosRef} radius={lensRadius} zoom={lensZoom} />
+
+      <div style={{ position: 'fixed', inset: 0, zIndex: 6, pointerEvents: 'none' }} aria-hidden={magNodes.length === 0}>
+        {magNodes.map((n) => (
+          <div
+            key={n.id}
+            style={{
+              position: 'absolute',
+              left: n.x,
+              top: n.y,
+              width: 14,
+              height: 14,
+              marginLeft: -7,
+              marginTop: -7,
+              borderRadius: 999,
+              backgroundColor: 'rgba(var(--accent-rgb), 0.35)',
+              border: '2px solid rgb(var(--accent-rgb))',
+              boxShadow: '0 0 0 1px rgba(0,0,0,0.35)',
+              pointerEvents: 'none',
+            }}
+          />
+        ))}
+      </div>
 
       <div style={{ position: 'fixed', top: 32, left: 32, zIndex: 10, cursor: 'default' }}>
         <button
