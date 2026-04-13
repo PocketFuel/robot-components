@@ -3381,7 +3381,11 @@ ${fence}
           Node Editor Canvas
         </h1>
         <p style={{ fontSize: 14, color: 'var(--muted-fg)', marginTop: 6, lineHeight: 1.57 }}>
-          Click anywhere to spawn nodes. Drag from the corner square to connect them. Slice through lines to cut connections.
+          Click anywhere to spawn nodes. Drag from the corner square to connect them. Slice through lines to cut connections.{' '}
+          <Link href="/nodegrid/magnifier" style={{ color: 'var(--app-fg)', textDecoration: 'underline' }}>
+            Magnifier mode
+          </Link>{' '}
+          uses a circular lens instead of windows.
         </p>
       </div>
 
