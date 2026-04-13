@@ -17,6 +17,7 @@ import {
   type GridType,
 } from '../grid-types';
 import { DotGridCanvas, NoiseOverlay } from './dot-grid-canvas';
+import { MagnifierGridOcclusion } from './magnifier-grid-occlusion';
 import { MagnifierLens } from './magnifier-lens';
 
 const clampNumber = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
@@ -109,8 +110,6 @@ export const MagnifierPlayground = () => {
       }}
       role="presentation"
     >
-      <NoiseOverlay />
-
       <DotGridCanvas
         key={`${canvasResetKey}-${gridCellSize}-${strokeScale}`}
         panelX={-9999}
@@ -135,6 +134,10 @@ export const MagnifierPlayground = () => {
           setGridCanvas(c);
         }}
       />
+
+      <MagnifierGridOcclusion mousePos={mousePos} radius={lensRadius} theme={theme} />
+
+      <NoiseOverlay overlayZIndex={2} />
 
       <MagnifierLens sourceCanvas={gridCanvas} mousePos={mousePos} radius={lensRadius} zoom={lensZoom} />
 

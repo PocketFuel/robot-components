@@ -6,7 +6,7 @@ import { DEFAULT_GRID_CELL_SIZE, DEFAULT_STROKE_SCALE } from '../grid-types';
 import { panelSounds } from './panel-sounds';
 
 // WebGL Noise Shader Overlay
-export function NoiseOverlay() {
+export function NoiseOverlay({ overlayZIndex = 1 }: { overlayZIndex?: number } = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mounted, setMounted] = useState(false);
   const [ready, setReady] = useState(false);
@@ -127,7 +127,7 @@ export function NoiseOverlay() {
         right: 0,
         bottom: 0,
         pointerEvents: 'none',
-        zIndex: 1,
+        zIndex: overlayZIndex,
         mixBlendMode: 'overlay',
         opacity: ready ? 1 : 0,
         transition: 'opacity 1s ease-out'
